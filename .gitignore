@@ -35,3 +35,6 @@ backend/outputs/*
 # ── PPT master cache (optional skill, ~80MB; PPT falls back to python-pptx) ──
 /skills/
 backend/skills/
+
+# ── ppt-master build probes (temp) ──
+backend/.pptx-build-*/
