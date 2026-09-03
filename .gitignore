@@ -38,3 +38,7 @@ backend/skills/
 
 # ── ppt-master build probes (temp) ──
 backend/.pptx-build-*/
+
+# ── Local dev: auth bootstrap used only for tooling screenshots ──
+frontend/public/_auth*.html
+backend/tmp_*.py
