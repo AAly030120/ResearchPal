@@ -1,0 +1,30 @@
+# ============================================================
+# ResearchPal — Render Deployment Config
+# ============================================================
+
+services:
+  # ── Backend API ──
+  - type: web
+    name: researchpal-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: DEBUG
+        value: "false"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: GLM_API_KEY
+        sync: false
+      - key: DEFAULT_MODEL
+        value: gpt-4o-mini

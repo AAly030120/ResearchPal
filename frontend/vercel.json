@@ -1,0 +1,10 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "regions": ["hkg1"],
+  "env": {
+    "NEXT_PUBLIC_API_URL": "https://your-backend.onrender.com"
+  }
+}

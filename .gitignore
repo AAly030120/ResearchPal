@@ -1,0 +1,37 @@
+# ── Environment & Secrets ──
+.env
+.env.local
+.env.production
+.api_keys.json
+*.db
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+backend/venv/
+backend/.venv/
+*.egg
+
+# ── Node ──
+node_modules/
+frontend/.next/
+frontend/out/
+
+# ── OS & IDE ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Uploads & Outputs (dev) ──
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/outputs/*
+!backend/outputs/.gitkeep
+
+# ── PPT master cache (optional skill, ~80MB; PPT falls back to python-pptx) ──
+/skills/
+backend/skills/
