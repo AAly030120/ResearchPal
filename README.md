@@ -1,3 +1,17 @@
+<p align="center">
+  <img src="docs/social-preview.png" alt="ResearchPal · AI 科研助手" width="100%">
+</p>
+
+<p align="center">
+  <a href="#-快速开始"><strong>▶ 本地一键体验（无需 API Key）</strong></a>
+  &nbsp;·&nbsp;
+  <a href="docs/PRODUCT.md">📋 产品决策</a>
+  &nbsp;·&nbsp;
+  <a href="docs/INTERVIEW.md">🎤 面试故事库</a>
+  &nbsp;·&nbsp;
+  <a href="docs/GITHUB_LAUNCH.md">🚀 推送指引</a>
+</p>
+
 # ResearchPal · AI 科研助手
 
 > 面向高校学生的 **AI 驱动科研工作台**——把文献阅读、数据分析、报告撰写、演示制作等繁琐学术流程，一站式自动化。
@@ -8,6 +22,20 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#license)
 [![Demo](https://img.shields.io/badge/Demo-无需%20API%20Key-blue)](#%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B)
 
+## 📑 目录
+
+- [这是什么](#这是什么)
+- [🖼️ 界面预览](#-界面预览)
+- [功能特性](#功能特性)
+- [系统架构](#系统架构)
+- [技术栈](#技术栈)
+- [🚀 快速开始](#-快速开始)
+- [目录结构](#目录结构)
+- [工程亮点](#工程亮点)
+- [文档导航](#文档导航)
+- [Roadmap](#roadmap)
+- [License](#license)
+
 ---
 
 ## 这是什么
@@ -17,6 +45,22 @@ ResearchPal 是一款 **全栈 AI 产品**：用户上传论文 / 数据 / 文�
 它既是可用的科研工具，也是一个展示 **AI 产品设计 + 工程落地** 能力的作品项目。关于背后的用户研究、功能优先级、模型选型权衡与成功指标，见 [**PRODUCT.md**](docs/PRODUCT.md)。
 
 > 💡 **零配置即可体验**：不填任何 API Key 也能跑通全部功能（Demo 模式会返回示例结果，数据分析甚至会在隔离沙箱里真实执行并出图）。详见下方「快速开始」。
+
+---
+
+## 🖼️ 界面预览
+
+**落地页** —— 一句话讲清价值主张，5 秒决定要不要注册。
+
+![ResearchPal 落地页](docs/screenshots/home.png)
+
+**五大工具**（已登录真实界面）：
+
+| | |
+| :---: | :---: |
+| **📄 文献总结** — 上传 PDF/Word，一键结构化摘要 + 多种引用格式<br>![文献总结](docs/screenshots/tool-summary.png) | **📊 数据分析** — 上传 CSV/Excel，LLM 生成代码 → 沙箱执行出图<br>![数据分析](docs/screenshots/tool-analysis.png) |
+| **🎨 PPT 制作** — 自然语言描述风格，自动生成 `.pptx`<br>![PPT 制作](docs/screenshots/tool-ppt.png) | **💻 代码生成** — 自然语言需求 → 代码 → 一键执行<br>![代码生成](docs/screenshots/tool-code.png) |
+| **🌐 文件翻译** — PDF/Word 保留原排版的中英互译<br>![文件翻译](docs/screenshots/tool-translate.png) | **💬 AI 对话** — 基于历史任务的个性化记忆<br>![AI 对话](docs/screenshots/chat.png) |
 
 ---
 
@@ -139,6 +183,7 @@ researchpal/
 
 - [PRODUCT.md](docs/PRODUCT.md) — 用户研究、功能优先级、模型选型成本权衡、成功指标、AI 安全与学术诚信
 - [INTERVIEW.md](docs/INTERVIEW.md) — 简历要点写法 + 高频面试题回答库（为什么做 / 最大权衡 / 如何度量 / AI 安全思考）
+- [GITHUB_LAUNCH.md](docs/GITHUB_LAUNCH.md) — 推送前的门面清单：About 文案 / Topics / 社交预览图上传步骤 / 推送 checklist
 - [架构图](docs/architecture.svg)
 
 ---
