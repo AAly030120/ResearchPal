@@ -2,6 +2,17 @@
 # ResearchPal — Render Deployment Config
 # ============================================================
 
+# ⚠ PYTHON_VERSION 必须锁定 3.11.x
+# Render 默认拉取最新 Python（3.14）。但本项目依赖中 pydantic-core、
+# bcrypt、cryptography 均含 Rust 扩展，其预编译 wheel 仅覆盖到
+# 3.12/3.13，无 3.14 版本 → pip 退回源码编译 → 调用 maturin/Cargo →
+# Render 的 /usr/local/cargo 为只读文件系统 → 构建失败。
+# 锁定 3.11.9 后全部走预编译 wheel，无需任何本地编译。
+#
+# 注意：若使用「手动 Web Service」（非 Blueprint）部署，本文件的
+# envVars 不会被读取，需在 Render 面板该服务的 Environment 中
+# 再手动添加一次 PYTHON_VERSION=3.11.9。
+
 services:
   # ── Backend API ──
   - type: web
@@ -12,6 +23,8 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
