@@ -1,5 +1,6 @@
 import os
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
@@ -8,10 +9,21 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
 
     # ── Security ──
-    SECRET_KEY: str = os.getenv(
-        "SECRET_KEY",
-        "researchpal-secret-key-change-in-production-2026"
-    )
+    # SECURITY: never commit a real secret. In production (DEBUG=false) the app
+    # refuses to start unless SECRET_KEY is a strong, unique value.
+    # pydantic-settings reads the SECRET_KEY env var automatically; "" is the
+    # safe default (dev mode runs unsigned, production must override it).
+    SECRET_KEY: str = ""
+
+    @model_validator(mode="after")
+    def _enforce_production_secret(self):
+        if self.is_production and not self.SECRET_KEY:
+            raise ValueError(
+                "SECURITY: SECRET_KEY must be set in production. "
+                "Generate one with: openssl rand -hex 32"
+            )
+        return self
+
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
@@ -28,6 +40,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
 
     # ── Debug ──
+    # Dev by default so a fresh clone runs zero-config (Demo mode). Production
+    # deploys must set DEBUG=false, which then forces a real SECRET_KEY.
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
     # ── File storage ──

@@ -155,7 +155,13 @@ def run_python(code: str, data_path: str = None) -> dict:
                 text=True,
                 timeout=30,
                 cwd=tmpdir,
-                env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+                # SECURITY: never leak server secrets into the sandboxed subprocess.
+                # The child only needs PATH/TEMP/system vars to run pandas/matplotlib;
+                # secrets (SECRET_KEY, DB URL, provider API keys) are stripped.
+                env={k: v for k, v in os.environ.items()
+                     if k not in ("SECRET_KEY", "DATABASE_URL", "OPENAI_API_KEY",
+                                  "DEEPSEEK_API_KEY", "GLM_API_KEY", "QWEN_API_KEY")}
+                | {"PYTHONPATH": os.pathsep.join(sys.path)},
             )
         except subprocess.TimeoutExpired:
             return {

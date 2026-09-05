@@ -118,6 +118,8 @@ class LLMService:
             self._clients[model_key] = AsyncOpenAI(
                 api_key=api_key,
                 base_url=base_url,
+                timeout=60.0,      # fail fast instead of hanging for minutes
+                max_retries=3,     # built-in exponential backoff on transient errors
             )
         return self._clients[model_key]
 
