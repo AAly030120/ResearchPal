@@ -1,7 +1,3 @@
-# NOTE: This is an archive copy of `.github/workflows/ci.yml`.
-# CI was restored to `.github/workflows/ci.yml` on 2026-09-05 using a PAT with
-# the `workflow` scope. This copy is kept for reference / disaster recovery.
-
 name: CI
 
 on:
