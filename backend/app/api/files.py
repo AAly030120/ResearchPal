@@ -38,6 +38,11 @@ def _schedule_indexing(file_id: str) -> None:
         rag_service.schedule_index(file_id)
     except Exception as e:
         logger.warning(f"Could not schedule indexing for {file_id}: {e}")
+    try:
+        from app.services.kg_index import schedule_index as schedule_kg_index
+        schedule_kg_index(file_id)
+    except Exception as e:
+        logger.warning(f"Could not schedule KG indexing for {file_id}: {e}")
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".docx", ".doc", ".txt", ".md", ".csv",

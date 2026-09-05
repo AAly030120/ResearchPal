@@ -17,7 +17,7 @@ from app.core.security import get_current_user
 from app.models.database import engine, Base, get_db
 from app.models import File, Task, Conversation, Message, UserProfile  # noqa: ensure models are registered
 from app.models.user import User
-from app.api import auth, files, tasks, chat, settings as settings_api, rag as rag_api
+from app.api import auth, files, tasks, chat, settings as settings_api, rag as rag_api, kg as kg_api
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -115,6 +115,7 @@ app.include_router(tasks.router)
 app.include_router(chat.router)
 app.include_router(settings_api.router)
 app.include_router(rag_api.router)
+app.include_router(kg_api.router)
 
 # Apply global rate limiting middleware (in-memory; safe for single-instance deploy)
 app.state.limiter = limiter

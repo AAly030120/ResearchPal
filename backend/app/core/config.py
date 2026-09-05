@@ -84,6 +84,26 @@ class Settings(BaseSettings):
     # Minimum combined rerank score to inject a chunk as context (filters noise).
     RAG_MIN_SCORE: float = float(os.getenv("RAG_MIN_SCORE", "0.2"))
 
+    # ── Parent-child chunking ──
+    # Children are small retrieval units (embedded); parents are larger context
+    # windows returned to the LLM so answers stay grounded without token bloat.
+    RAG_CHILD_SIZE: int = int(os.getenv("RAG_CHILD_SIZE", "320"))
+    RAG_PARENT_SIZE: int = int(os.getenv("RAG_PARENT_SIZE", "700"))
+
+    # ── Cross-encoder reranker (optional) ──
+    # When fastembed's Reranker is importable it re-ranks the vector candidates
+    # with a cross-encoder; otherwise the heuristic (cosine + jieba) is used.
+    RAG_RERANKER_MODEL: str = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+    RAG_CROSS_ENCODER_WEIGHT: float = float(os.getenv("RAG_CROSS_ENCODER_WEIGHT", "1.0"))
+
+    # ── Knowledge Graph (GraphRAG) ──
+    # LitKG-style entity/relation extraction + graph retrieval, fused into chat.
+    KG_ENABLED: bool = os.getenv("KG_ENABLED", "true").lower() == "true"
+    # Model used for KG extraction / community summaries; empty => current chat model.
+    KG_EXTRACTION_MODEL: str = os.getenv("KG_EXTRACTION_MODEL", "")
+    KG_MAX_ENTITIES_PER_FILE: int = int(os.getenv("KG_MAX_ENTITIES_PER_FILE", "60"))
+    KG_RETRIEVAL_HOPS: int = int(os.getenv("KG_RETRIEVAL_HOPS", "2"))
+
     class Config:
         env_file = ".env"
 

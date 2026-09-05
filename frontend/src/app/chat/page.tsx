@@ -12,11 +12,23 @@ interface AttachedFile {
   name: string;
 }
 
+interface Source {
+  file?: string;
+  name?: string;
+  chunk?: number | string;
+  page?: number;
+  text?: string;
+  description?: string;
+  file_id?: string;
+  score?: number;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   file_id?: string | null;
+  sources?: Source[];
   created_at: string;
 }
 
@@ -26,6 +38,51 @@ interface Conversation {
   model_used: string;
   created_at: string;
   updated_at: string;
+}
+
+function SourcesBlock({ sources }: { sources: Source[] }) {
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  if (!sources || sources.length === 0) return null;
+  return (
+    <div className="mt-2 border-t border-black/10 pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="text-[11px] font-medium text-indigo-700 hover:underline flex items-center gap-1"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+        </svg>
+        参考来源 ({sources.length})
+      </button>
+      {open && (
+        <ul className="mt-1.5 space-y-1">
+          {sources.map((s, i) => {
+            const label = `${s.file || s.name || '资料'}${s.page ? ` 第${s.page}页` : ''}${s.chunk != null ? ` · #${s.chunk}` : ''}`;
+            const snippet = s.text || s.description;
+            return (
+              <li key={i}>
+                <button
+                  type="button"
+                  onClick={() => setExpanded(expanded === i ? null : i)}
+                  className="w-full text-left text-[11px] text-gray-600 hover:text-indigo-700 bg-white/70 rounded px-2 py-1 transition-colors"
+                  title={snippet ? '点击查看引用片段' : undefined}
+                >
+                  {i + 1}. {label}
+                </button>
+                {expanded === i && snippet && (
+                  <div className="ml-3 mt-0.5 text-[11px] text-gray-500 bg-white/80 rounded px-2 py-1 whitespace-pre-wrap border-l-2 border-indigo-200">
+                    {snippet}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export default function ChatPage() {
@@ -41,6 +98,9 @@ export default function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [showUploader, setShowUploader] = useState(false);
   const [useRag, setUseRag] = useState(true);
+  const [useGraph, setUseGraph] = useState(true);
+  const [deepMode, setDeepMode] = useState(false);
+  const [deepStatus, setDeepStatus] = useState<string | null>(null);
   const [retrievedCount, setRetrievedCount] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -83,6 +143,8 @@ export default function ChatPage() {
     setActiveConvId(null);
     setMessages([]);
     setStreamText('');
+    setDeepStatus(null);
+    setRetrievedCount(null);
     setAttachedFiles([]);
   };
 
@@ -131,6 +193,32 @@ export default function ChatPage() {
     }
   };
 
+  const finalizeAssistant = (
+    content: string,
+    convId?: string,
+    retrieved?: number,
+    sources?: Source[],
+  ) => {
+    const assistantMsg: Message = {
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content,
+      sources: sources && sources.length ? sources : undefined,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, assistantMsg]);
+    setStreamText('');
+    setStreaming(false);
+    setDeepStatus(null);
+    setRetrievedCount(retrieved ?? null);
+    abortRef.current = null;
+    if (convId && !activeConvId) {
+      setActiveConvId(convId);
+      loadConversations();
+    }
+    if (activeConvId) loadConversations();
+  };
+
   const handleSend = useCallback(async (e?: FormEvent) => {
     if (e) e.preventDefault();
     const text = input.trim();
@@ -139,6 +227,11 @@ export default function ChatPage() {
     setStreaming(true);
     setStreamText('');
     setRetrievedCount(null);
+    if (deepMode) {
+      setDeepStatus('🔬 深度研究中：检索 + 规划子问题 + 逐章撰写（可能需要 1-2 分钟）…');
+    } else {
+      setDeepStatus(null);
+    }
 
     const displayContent = text || (attachedFiles.length > 0 ? `[发送了 ${attachedFiles.length} 个文件]` : '');
 
@@ -155,44 +248,53 @@ export default function ChatPage() {
     setAttachedFiles([]);
 
     let fullResponse = '';
+    const payload = {
+      conversation_id: activeConvId || undefined,
+      message: text || '请分析这些文件的内容',
+      file_ids: currentFileIds.length > 0 ? currentFileIds : undefined,
+      use_rag: useRag,
+      use_graph: useGraph,
+    };
 
-    abortRef.current = api.streamChat(
-      '/api/chat/send',
-      {
-        conversation_id: activeConvId || undefined,
-        message: text || '请分析这些文件的内容',
-        file_ids: currentFileIds.length > 0 ? currentFileIds : undefined,
-        use_rag: useRag,
-      },
-      (chunk: string) => {
-        fullResponse += chunk;
-        setStreamText(fullResponse);
-      },
-      (convId?: string, retrieved?: number) => {
-        const assistantMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: fullResponse,
-          created_at: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        setStreamText('');
-        setStreaming(false);
-        setRetrievedCount(retrieved ?? null);
-        abortRef.current = null;
-        if (convId && !activeConvId) {
-          setActiveConvId(convId);
-          loadConversations();
-        }
-        if (activeConvId) loadConversations();
-      },
-      (err: string) => {
-        setStreamText(err);
-        setStreaming(false);
-        abortRef.current = null;
-      },
-    );
-  }, [input, streaming, activeConvId, attachedFiles]);
+    const onError = (err: string) => {
+      setStreamText(err);
+      setStreaming(false);
+      setDeepStatus(null);
+      abortRef.current = null;
+    };
+
+    if (deepMode) {
+      abortRef.current = api.streamResearch(
+        '/api/chat/research',
+        payload,
+        (stage: string) => {
+          if (stage === 'plan') setDeepStatus('🧭 已规划研究大纲，开始逐章撰写…');
+          else if (stage === 'refs') setDeepStatus('📚 整理参考来源…');
+        },
+        (chunk: string) => {
+          fullResponse += chunk;
+          setStreamText(fullResponse);
+        },
+        (convId?: string, retrieved?: number, sources?: Source[]) => {
+          finalizeAssistant(fullResponse, convId, retrieved, sources);
+        },
+        onError,
+      );
+    } else {
+      abortRef.current = api.streamChat(
+        '/api/chat/send',
+        payload,
+        (chunk: string) => {
+          fullResponse += chunk;
+          setStreamText(fullResponse);
+        },
+        (convId?: string, retrieved?: number, sources?: Source[]) => {
+          finalizeAssistant(fullResponse, convId, retrieved, sources);
+        },
+        onError,
+      );
+    }
+  }, [input, streaming, activeConvId, attachedFiles, useRag, useGraph, deepMode]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -295,12 +397,18 @@ export default function ChatPage() {
                   </div>
                 )}
                 <div className="whitespace-pre-wrap">{msg.content}</div>
+                {msg.sources && msg.sources.length > 0 && <SourcesBlock sources={msg.sources} />}
               </div>
             </div>
           ))}
           {streaming && (
             <div className="flex justify-start">
               <div className="max-w-[75%] bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md px-4 py-3 text-sm leading-relaxed">
+                {deepStatus && (
+                  <div className="mb-2 text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5">
+                    {deepStatus}
+                  </div>
+                )}
                 <div className="whitespace-pre-wrap">
                   {streamText || (
                     <div className="flex space-x-1.5">
@@ -379,6 +487,42 @@ export default function ChatPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 18a7 7 0 110-14 7 7 0 010 14z" />
               </svg>
               RAG
+            </button>
+
+            {/* GraphRAG (knowledge-graph) toggle */}
+            <button
+              type="button"
+              onClick={() => setUseGraph(!useGraph)}
+              className={`px-3 py-3 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 ${
+                useGraph
+                  ? 'bg-sky-100 text-sky-700 hover:bg-sky-200'
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+              title={useGraph ? '知识图谱增强已开启：回答将结合实体关系图谱' : '知识图谱增强已关闭'}
+              disabled={streaming}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 11-4 0 2 2 0 014 0zM21 7a2 2 0 11-4 0 2 2 0 014 0zM12 21a2 2 0 11-4 0 2 2 0 014 0zM4.5 5.5l5.5 13M17 7l-4.5 12.5M19 7l-13 1.5" />
+              </svg>
+              图谱
+            </button>
+
+            {/* Deep-research mode toggle */}
+            <button
+              type="button"
+              onClick={() => setDeepMode(!deepMode)}
+              className={`px-3 py-3 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 ${
+                deepMode
+                  ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+              title={deepMode ? '深度研究模式：自动规划子问题并多源检索撰写报告' : '普通对话模式（点击切换为深度研究）'}
+              disabled={streaming}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-6 0h.01M12 16h3m-6 0h.01" />
+              </svg>
+              {deepMode ? '深度研究中' : '深度研究'}
             </button>
 
             {/* File attach button */}

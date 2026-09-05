@@ -46,3 +46,6 @@ class Task(Base):
 
 from app.models.chat import Conversation, Message
 from app.models.user_profile import UserProfile
+
+# Knowledge-graph (GraphRAG) models
+from app.models.kg import KGEntity, KGTriple, KGCommunity

@@ -9,9 +9,10 @@
 |---|---|---|
 | **open-webui** | secure-by-default、依赖安全治理、OpenTelemetry 可观测、向量库抽象 | 生产密钥强制、CVE 依赖升级、错误契约统一 |
 | **paper-qa (PaperQA2)** | Pydantic Settings 集中配置、速率限制、文内引用、失败重试、混合检索 | 速率限制、LLM 超时/重试、配置集中管理 |
-| **RAGFlow** | 模板化分块 + 多召回融合 + 重排、解析失败不静默丢弃 | （规划中）RAG 检索增强 |
+| **RAGFlow** | 模板化分块 + 多召回融合 + 重排、解析失败不静默丢弃 | 已实施：父子分块 + 交叉编码器重排（Top-1/2） |
 | **AnythingLLM** | 双服务解析隔离、统一错误契约 `success:false` | 统一异常处理 + 错误契约 |
-| **gpt-researcher** | 多代理审校流水线、SSRF/本地文件读取防护 | （规划中）多代理审校 |
+| **gpt-researcher** | 多代理审校流水线、自动规划子问题、深度研究 | 已实施：深度研究 Agent（规划→检索→合成→参考来源） |
+| **LitKG（自有项目）** | 实体/关系抽取 + NetworkX 图谱 + Louvain 社区发现 | 已融合：GraphRAG 知识图谱增强 |
 
 ## 二、已实施并测试锁定（本轮）
 
@@ -49,18 +50,35 @@
 8. **基础测试 + CI** — `backend/tests/` + `.github/workflows/ci.yml`
    6 项安全回归测试，push/PR 自动跑（open-webui 风格的回归防护）。
 
+### P2 · RAG 增强（Top-3 + GraphRAG，复刻 RAGFlow / gpt-researcher / LitKG）
+
+9. **父子分块（Parent-Child Chunking）** — `backend/app/services/rag_service.py`
+   子块（≤320 字）用于向量检索、父块（≤700 字）作为注入 LLM 的生成上下文窗口，
+   配套页码级元数据（`pages`），回答可标 `[来源: 文件名 第N页 #片段M]`。
+   复刻 RAGFlow 的「模板化分块 + 大上下文」思路。
+
+10. **交叉编码器重排（Cross-Encoder Reranker）** — `backend/app/services/reranker.py`
+    检索后用 fastembed `bge-reranker-v2-m3` 对 Top 候选做 (query, passage) 重打分；
+    fastembed 缺失 / 模型加载失败时**优雅降级**为「余弦 + jieba 关键词」启发式，零外部依赖也能跑。
+
+11. **知识图谱 GraphRAG（融合 LitKG）** — `backend/app/services/kg_*.py` + `backend/app/api/kg.py`
+    抽取 10 类实体 / 10 类关系 → Postgres 持久化 + NetworkX 内存图；对话时沿图谱 **N 跳扩展**
+    检索上下文，Louvain 社区发现 + LLM 主题摘要，单文件范围检索。复用本平台 `llm_service`。
+
+12. **深度研究 Agent** — `backend/app/services/research_service.py` + `POST /api/chat/research`
+    规划子问题 → 并行检索向量库与知识图谱 → 逐章流式合成 → 自动汇总参考来源；SSE 实时进度。
+    复刻 gpt-researcher 的多步研究流水线。
+
 ## 三、验证结果
 
-- 6/6 测试通过（下载鉴权/越权/穿越、沙箱密钥剥离、生产密钥强制、dev 空密钥放行）
+- 13/13 测试通过（6 项安全回归 + 7 项新增 RAG/GraphRAG/深度研究逻辑测试）
+  - 新增 `backend/tests/test_rag_kg.py`：父子分块、重排器降级、图谱 N 跳扩展、深度研究 pipeline（LLM/检索均 mock）
+- 生产模式启动冒烟：`/api/health` 返回 production、未登录下载 401、限流中间件激活
 - 生产模式启动冒烟：`/api/health` 返回 production、未登录下载 401、限流中间件激活
 
 ## 四、待决策的高阶项（需你拍板）
 
-- [ ] **RAG 检索增强（最高价值，但改动大）**
-  当前 chat / 文献总结是把上传文档文本**直接拼接进 prompt（上限 30000 字符）**：
-  长文被截断、跨文档无去重、无语义检索——这是核心功能在真实科研场景最脆弱处。
-  计划：引入向量库（Chroma）+ 文档分块 + Embedding + 检索 + 重排，复刻 RAGFlow/paper-qa。
-  ⚠️ 会影响核心对话链路，且需评估 Demo 离线运行（无外部 Embedding 服务时降级）。
+- [x] **RAG 检索增强（最高价值）** — 已完成：Chroma 向量库 + 父子分块 + Embedding（本地 fastembed / DashScope）+ 检索 + 交叉编码器重排 + 页码级引用；Demo 离线（无外部 Embedding）时自动降级启发式。详见上方 P2 第 9–10 项。
 
 - [ ] **双服务解析隔离**（AnythingLLM）：大文件解析移到独立 worker，避免阻塞主链路。
 

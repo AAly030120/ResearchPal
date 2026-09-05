@@ -86,8 +86,15 @@ export default function DashboardPage() {
   const [ragStatus, setRagStatus] = useState<{ provider?: string; total_indexed_chunks?: number; indexed_files?: number } | null>(null);
   const [indexingAll, setIndexingAll] = useState(false);
   const [reindexingId, setReindexingId] = useState<string | null>(null);
+  const [kgStatus, setKgStatus] = useState<{
+    stats?: { entities: number; triples: number; communities: number };
+    files?: Array<{ id: string; name: string; type: string; indexed: boolean; kg_entities: number; kg_ready: boolean }>;
+  } | null>(null);
+  const [kgIndexingAll, setKgIndexingAll] = useState(false);
+  const [kgIndexingId, setKgIndexingId] = useState<string | null>(null);
+  const [kgCommunitiesLoading, setKgCommunitiesLoading] = useState(false);
 
-  // File types that can be embedded & retrieved via RAG.
+  // File types that can be embedded & retrieved via RAG / GraphRAG.
   const INDEXABLE = new Set(['pdf', 'docx', 'txt', 'md', 'pptx']);
 
   const loadRagStatus = useCallback(async () => {
@@ -104,6 +111,59 @@ export default function DashboardPage() {
     }
   }, [user]);
 
+  const loadKgStatus = useCallback(async () => {
+    if (!user) return;
+    try {
+      const data = await api.get('/api/kg/status');
+      setKgStatus({
+        stats: data.stats || { entities: 0, triples: 0, communities: 0 },
+        files: data.files || [],
+      });
+    } catch {
+      /* KG status is best-effort */
+    }
+  }, [user]);
+
+  const kgFileInfo = (fileId: string) => kgStatus?.files?.find((f) => f.id === fileId);
+
+  const handleKgIndexOne = async (fileId: string) => {
+    setKgIndexingId(fileId);
+    try {
+      await api.post(`/api/kg/index/${fileId}`, {});
+      await loadKgStatus();
+    } catch (err: any) {
+      setError(err.message || '构建图谱失败');
+    } finally {
+      setKgIndexingId(null);
+    }
+  };
+
+  const handleKgIndexAll = async () => {
+    setKgIndexingAll(true);
+    try {
+      await api.post('/api/kg/index-all', {});
+      await loadKgStatus();
+    } catch (err: any) {
+      setError(err.message || '构建图谱失败');
+    } finally {
+      setKgIndexingAll(false);
+    }
+  };
+
+  const handleKgCommunities = async () => {
+    setKgCommunitiesLoading(true);
+    try {
+      await api.post('/api/kg/communities', {});
+      await loadKgStatus();
+    } catch (err: any) {
+      setError(err.message || '社区检测失败');
+    } finally {
+      setKgCommunitiesLoading(false);
+    }
+  };
+
+
+
   const loadData = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -118,7 +178,8 @@ export default function DashboardPage() {
     if (errors.length > 0) setError(errors.join('; '));
     setLoading(false);
     loadRagStatus();
-  }, [user, loadRagStatus]);
+    loadKgStatus();
+  }, [user, loadRagStatus, loadKgStatus]);
 
   const handleReindex = async (fileId: string) => {
     setReindexingId(fileId);
@@ -236,6 +297,35 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {activeTab === 'files' && (
+        <div className="flex items-center justify-between mb-4 bg-sky-50 border border-sky-200 rounded-xl px-4 py-3">
+          <div className="text-sm text-sky-800">
+            <span className="font-medium">知识图谱 (GraphRAG)：</span>
+            {kgStatus
+              ? `已抽取 ${kgStatus.stats?.entities ?? 0} 个实体 / ${kgStatus.stats?.triples ?? 0} 条关系 / ${kgStatus.stats?.communities ?? 0} 个社区`
+              : '加载中…'}
+            <span className="text-sky-600 ml-1">基于实体关系多跳检索增强回答</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleKgCommunities}
+              disabled={kgCommunitiesLoading || kgIndexingAll}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-sky-500 rounded-lg hover:bg-sky-600 disabled:opacity-50 transition-colors"
+              title="社区发现+LLM摘要（全局主题视图）"
+            >
+              {kgCommunitiesLoading ? '检测中…' : '检测社区'}
+            </button>
+            <button
+              onClick={handleKgIndexAll}
+              disabled={kgIndexingAll}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-sky-600 rounded-lg hover:bg-sky-700 disabled:opacity-50 transition-colors"
+            >
+              {kgIndexingAll ? '构建中…' : '重建全部图谱'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-20 text-gray-500">{t('common.loading')}</div>
       ) : activeTab === 'files' ? (
@@ -263,6 +353,12 @@ export default function DashboardPage() {
                       ) : (
                         <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">未索引</span>
                       )
+                    )}
+                    {INDEXABLE.has(file.file_type) && kgFileInfo(file.id)?.kg_ready && (
+                      <span className="text-[10px] bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 5a2 2 0 11-4 0 2 2 0 014 0zM21 7a2 2 0 11-4 0 2 2 0 014 0zM12 21a2 2 0 11-4 0 2 2 0 014 0zM4.5 5.5l5.5 13M17 7l-4.5 12.5M19 7l-13 1.5" /></svg>
+                        图谱已建
+                      </span>
                     )}
                   </div>
                   <button onClick={() => handleDeleteFile(file.id)} className="text-gray-400 hover:text-red-500 transition-colors" title="Delete">
@@ -338,6 +434,21 @@ export default function DashboardPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.5-3.5L20 8M20 15a9 9 0 01-14.5 3.5L4 16" />
                       </svg>
                       {reindexingId === file.id ? '索引中' : (file.indexed ? '重索引' : '索引')}
+                    </button>
+                  )}
+
+                  {/* Build knowledge graph (GraphRAG) */}
+                  {INDEXABLE.has(file.file_type) && (
+                    <button
+                      onClick={() => handleKgIndexOne(file.id)}
+                      disabled={kgIndexingId === file.id}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 rounded-lg hover:bg-sky-50 hover:text-sky-600 transition-colors disabled:opacity-50"
+                      title={kgFileInfo(file.id)?.kg_ready ? '更新知识图谱' : '抽取实体与关系，构建知识图谱'}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 11-4 0 2 2 0 014 0zM21 7a2 2 0 11-4 0 2 2 0 014 0zM12 21a2 2 0 11-4 0 2 2 0 014 0zM4.5 5.5l5.5 13M17 7l-4.5 12.5M19 7l-13 1.5" />
+                      </svg>
+                      {kgIndexingId === file.id ? '建图中' : (kgFileInfo(file.id)?.kg_ready ? '更新图' : '建图')}
                     </button>
                   )}
                 </div>

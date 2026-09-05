@@ -308,7 +308,7 @@ class ApiClient {
     endpoint: string,
     data: any,
     onChunk: (text: string) => void,
-    onDone: (convId?: string, retrievedCount?: number) => void,
+    onDone: (convId?: string, retrievedCount?: number, sources?: any[]) => void,
     onError: (err: string) => void,
     signal?: AbortSignal,
   ): AbortController {
@@ -348,7 +348,75 @@ class ApiClient {
                 try {
                   const parsed = JSON.parse(raw);
                   if (parsed.chunk) onChunk(parsed.chunk);
-                  if (parsed.done) onDone(parsed.conversation_id, parsed.retrieved_count);
+                  if (parsed.done) onDone(parsed.conversation_id, parsed.retrieved_count, parsed.sources);
+                  if (parsed.error && parsed.chunk) onError(parsed.chunk);
+                } catch {}
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+        onError(err.message || 'Connection failed');
+      }
+    })();
+
+    return controller!;
+  }
+
+  /**
+   * Stream the deep-research endpoint. The server emits three kinds of events:
+   *   { stage, text }      – progress markers (plan / refs)
+   *   { chunk }            – report text fragment
+   *   { done, sources, ... }– final report; carries reference sources
+   */
+  streamResearch(
+    endpoint: string,
+    data: any,
+    onStage: (stage: string, text: string) => void,
+    onChunk: (text: string) => void,
+    onDone: (convId?: string, retrievedCount?: number, sources?: any[]) => void,
+    onError: (err: string) => void,
+    signal?: AbortSignal,
+  ): AbortController {
+    const token = this.getToken();
+    const controller = signal ? null : new AbortController();
+    const effectiveSignal = signal || controller!.signal;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(data),
+          signal: effectiveSignal,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          onError(extractErrorMessage(err));
+          return;
+        }
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        if (reader) {
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const raw = line.slice(6);
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (parsed.stage) onStage(parsed.stage, parsed.text || '');
+                  if (parsed.chunk) onChunk(parsed.chunk);
+                  if (parsed.done) onDone(parsed.conversation_id, parsed.retrieved_count, parsed.sources);
                   if (parsed.error && parsed.chunk) onError(parsed.chunk);
                 } catch {}
               }

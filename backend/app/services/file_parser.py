@@ -11,6 +11,7 @@ def parse_pdf(file_path: str) -> dict:
     import pdfplumber
 
     text_parts = []
+    pages = []  # per-page text, used for page-level citations
     pages_count = 0
     metadata = {}
     try:
@@ -18,7 +19,8 @@ def parse_pdf(file_path: str) -> dict:
             pages_count = len(pdf.pages)
             metadata = pdf.metadata or {}
             for page in pdf.pages:
-                page_text = page.extract_text()
+                page_text = page.extract_text() or ""
+                pages.append(page_text)
                 if page_text:
                     text_parts.append(page_text)
     except Exception as e:
@@ -27,6 +29,7 @@ def parse_pdf(file_path: str) -> dict:
 
     return {
         "text": "\n\n".join(text_parts),
+        "pages": pages,
         "pages_count": pages_count,
         "metadata": {k: str(v) for k, v in metadata.items() if v},
     }

@@ -72,20 +72,27 @@ class VectorStore:
         original_name: str,
         chunks: List[str],
         embeddings: List[List[float]],
+        parent_texts: Optional[List[str]] = None,
+        pages: Optional[List[int]] = None,
     ) -> int:
         if not chunks:
             return 0
         col = self._get_collection()
         ids = [f"{file_id}:{i}" for i in range(len(chunks))]
-        metadatas = [
-            {
+        metadatas = []
+        for i in range(len(chunks)):
+            meta = {
                 "user_id": user_id,
                 "file_id": file_id,
                 "original_name": original_name,
                 "chunk_index": i,
+                "page": (pages[i] if pages else 0) or 0,
             }
-            for i in range(len(chunks))
-        ]
+            # Parent text is the larger context window returned to the LLM at
+            # retrieval time; store it so it survives persistence / heal re-index.
+            if parent_texts and i < len(parent_texts) and parent_texts[i]:
+                meta["parent_text"] = parent_texts[i][:4000]
+            metadatas.append(meta)
         col.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
         logger.info("Indexed %d chunks for file %s (%s)", len(chunks), file_id, original_name)
         return len(chunks)

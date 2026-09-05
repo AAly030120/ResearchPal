@@ -18,6 +18,7 @@ from app.schemas.chat import (
 from app.services.llm_service import llm_service
 from app.services.file_parser import extract_text
 from app.services.rag_service import rag_service
+from app.services import research_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -170,6 +171,7 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
     # are attached and already indexed, restrict retrieval to those files.
     rag_context = ""
     retrieved_count = 0
+    all_sources = []
     if use_rag and llm_service._has_key(model) and rag_service.has_documents(current_user.id):
         try:
             file_ids_filter = indexed_attached_ids if indexed_attached_ids else None
@@ -177,17 +179,35 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
             if hits:
                 rag_context, _sources = rag_service.format_context(hits)
                 retrieved_count = len(hits)
+                all_sources.extend(_sources)
         except Exception as e:
             logger.warning(f"RAG retrieval failed (continuing without): {e}")
             rag_context = ""
 
+    # ── GraphRAG augmentation ─────────────────────────────────────────
+    # Expand the query through the knowledge graph and append entity/relation
+    # context. Enabled when the graph exists for this user (and not disabled).
+    use_graph = body.use_graph if body.use_graph is not None else True
+    try:
+        from app.services.kg_store import get_graph, retrieve_context as kg_retrieve
+
+        if use_graph and get_graph(current_user.id).number_of_nodes() > 0:
+            file_ids_filter = indexed_attached_ids if indexed_attached_ids else None
+            kg_ctx, kg_sources = kg_retrieve(body.message, current_user.id, file_ids=file_ids_filter)
+            if kg_ctx:
+                rag_context = (rag_context + "\n\n" + kg_ctx).strip()
+                retrieved_count += len(kg_sources)
+                all_sources.extend(kg_sources)
+    except Exception as e:
+        logger.warning(f"GraphRAG retrieval failed (continuing without): {e}")
+
     system_prompt = None
     if rag_context:
         system_prompt = (
-            "你是一个严谨的科研文献助手。请严格依据下方【检索到的文献片段】作答；"
-            "若片段信息不足以回答，请明确说明“根据提供的资料无法回答”，不要编造或引入片段之外的知识。"
-            "回答时请使用 [来源: 文件名 #片段N] 格式标注引用。\n\n"
-            f"【检索到的文献片段】\n{rag_context}"
+            "你是一个严谨的科研文献助手。请严格依据下方【检索到的文献片段】与【知识图谱】作答；"
+            "若信息不足以回答，请明确说明“根据提供的资料无法回答”，不要编造或引入资料之外的知识。"
+            "回答时请使用 [来源: 文件名 #片段N] 或 [来源: 实体名] 格式标注引用。\n\n"
+            f"【检索到的文献片段与知识图谱】\n{rag_context}"
         )
 
     async def stream_response():
@@ -207,10 +227,89 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
         db.add(assistant_msg)
         conv.updated_at = datetime.now(timezone.utc)
         db.commit()
-        yield f"data: {json.dumps({'done': True, 'conversation_id': conv.id, 'retrieved_count': retrieved_count})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'conversation_id': conv.id, 'retrieved_count': retrieved_count, 'sources': all_sources})}\n\n"
 
     return StreamingResponse(
         stream_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/research")
+async def research_message(body: ChatRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Deep-research mode: plan → retrieve (RAG + GraphRAG) → synthesize → report."""
+    model = body.model or current_user.preferred_model
+    if model and not llm_service._has_key(model):
+        for mdl in llm_service._model_configs:
+            if llm_service._has_key(mdl["key"]):
+                model = mdl["key"]
+                break
+    if not model:
+        for mdl in llm_service._model_configs:
+            if llm_service._has_key(mdl["key"]):
+                model = mdl["key"]
+                break
+        if not model:
+            model = settings.DEFAULT_MODEL
+
+    if body.conversation_id:
+        conv = db.query(Conversation).filter(
+            Conversation.id == body.conversation_id, Conversation.user_id == current_user.id
+        ).first()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    else:
+        title = body.message[:50] if len(body.message) > 50 else body.message
+        conv = Conversation(user_id=current_user.id, title=title, model_used=model)
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+
+    user_msg = Message(
+        conversation_id=conv.id,
+        role="user",
+        content=body.message,
+        file_id=",".join(body.file_ids) if body.file_ids else None,
+    )
+    db.add(user_msg)
+    conv.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    async def stream():
+        content = ""
+        done_sent = False
+        try:
+            async for ev in research_service.research_stream(
+                body.message, current_user.id, model, file_ids=body.file_ids
+            ):
+                if ev.get("done"):
+                    content = ev.get("content", "")
+                    done_sent = True
+                    yield f"data: {json.dumps({'done': True, 'conversation_id': conv.id, 'retrieved_count': ev.get('retrieved_count', 0), 'sources': ev.get('sources', [])})}\n\n"
+                elif ev.get("stage"):
+                    yield f"data: {json.dumps({'stage': ev['stage'], 'text': ev.get('text', '')})}\n\n"
+                elif ev.get("chunk"):
+                    yield f"data: {json.dumps({'chunk': ev['chunk']})}\n\n"
+        except Exception as e:
+            logger.error(f"research error: {e}")
+            yield f"data: {json.dumps({'chunk': f'[Error] {e}', 'error': True})}\n\n"
+
+        if not content:
+            content = "(生成失败)"
+        assistant = Message(conversation_id=conv.id, role="assistant", content=content)
+        db.add(assistant)
+        conv.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        if not done_sent:
+            yield f"data: {json.dumps({'done': True, 'conversation_id': conv.id})}\n\n"
+
+    return StreamingResponse(
+        stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

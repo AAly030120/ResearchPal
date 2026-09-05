@@ -98,6 +98,90 @@ def chunk_text(
     return [c for c in chunks if c.strip()]
 
 
+# ── Parent-child chunking ─────────────────────────────────────────────
+def _split_paras(text: str) -> List[str]:
+    return [p for p in re.split(r"\n\s*\n|\r\n\s*\r\n", text)]
+
+
+def _split_to_size(para: str, size: int, overlap: int) -> List[str]:
+    """Split a single paragraph into <=size pieces (sentence-aware) with overlap."""
+    if len(para) <= size:
+        return [para]
+    sentences = [s for s in re.split(r"(?<=[。.!?！？；;\n])", para) if s.strip()]
+    if not sentences:
+        sentences = [para]
+    out: List[str] = []
+    cur = ""
+    for seg in sentences:
+        if len(seg) > size:
+            if cur:
+                out.append(cur)
+                cur = ""
+            for i in range(0, len(seg), size):
+                out.append(seg[i : i + size])
+            continue
+        if len(cur) + len(seg) + 1 <= size:
+            cur = (cur + "\n" + seg).strip() if cur else seg
+        else:
+            if cur:
+                out.append(cur)
+            cur = seg
+    if cur:
+        out.append(cur)
+    if overlap > 0 and len(out) > 1:
+        res = [out[0]]
+        for i in range(1, len(out)):
+            prev = out[i - 1]
+            tail = prev[-overlap:] if len(prev) > overlap else prev
+            res.append(tail + "\n" + out[i])
+        out = res
+    return [o for o in out if o.strip()]
+
+
+def chunk_parent_child(
+    text: str,
+    child_size: int = None,
+    parent_size: int = None,
+    overlap: int = None,
+    pages: List[str] = None,
+) -> List[dict]:
+    """Parent-child chunking for better retrieval + grounded generation.
+
+    Produces many small ``child`` chunks (embedded, used for vector retrieval)
+    each paired with its ``parent`` (the paragraph it came from, used as the
+    context window returned to the LLM). When ``pages`` is supplied, the source
+    page number is tracked per chunk for page-level citations.
+
+    Returns a list of {"child", "parent", "page"} dicts.
+    """
+    child_size = child_size or settings.RAG_CHILD_SIZE
+    parent_size = parent_size or settings.RAG_PARENT_SIZE
+    overlap = overlap or settings.RAG_CHUNK_OVERLAP
+
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    if pages:
+        paras: List[str] = []
+        page_of: List[int] = []
+        for pi, pt in enumerate(pages, 1):
+            for p in _split_paras(pt):
+                if p.strip():
+                    paras.append(p.strip())
+                    page_of.append(pi)
+    else:
+        paras = [p.strip() for p in _split_paras(text) if p.strip()]
+        page_of = [0] * len(paras)
+
+    items: List[dict] = []
+    for p, pg in zip(paras, page_of):
+        parent = p if len(p) <= parent_size else p[:parent_size]
+        for child in _split_to_size(p, child_size, overlap):
+            items.append({"child": child, "parent": parent, "page": pg})
+    return items
+
+
 # ── Hybrid reranking ───────────────────────────────────────────────────
 def _tokenize(text: str) -> set:
     return {
@@ -117,12 +201,29 @@ def rerank(
 ) -> List[dict]:
     if top_n is None:
         top_n = settings.RAG_TOP_N
+    if min_score is None:
+        min_score = settings.RAG_MIN_SCORE
+
+    # ── Preferred: cross-encoder reranking ──
+    from app.services.reranker import reranker as ce_reranker
+
+    if ce_reranker.available:
+        docs = [h.get("document", "") for h in hits]
+        ce_scores = ce_reranker.rerank(query, docs)
+        if ce_scores is not None and len(ce_scores) == len(hits):
+            scored = []
+            for h, s in zip(hits, ce_scores):
+                if s < min_score:
+                    continue
+                scored.append((float(s), h))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return [h for _, h in scored[:top_n]]
+
+    # ── Fallback: heuristic (cosine similarity + jieba keyword overlap) ──
     if vector_weight is None:
         vector_weight = settings.RAG_VECTOR_WEIGHT
     if keyword_weight is None:
         keyword_weight = settings.RAG_KEYWORD_WEIGHT
-    if min_score is None:
-        min_score = settings.RAG_MIN_SCORE
 
     q_tokens = _tokenize(query)
     scored = []
@@ -179,9 +280,22 @@ class RAGService:
             meta = h.get("metadata", {})
             name = meta.get("original_name", "文档")
             idx = meta.get("chunk_index", 0)
-            label = f"[来源: {name} #片段{idx + 1}]"
-            parts.append(f"{h.get('document', '')}\n{label}")
-            sources.append({"file": name, "chunk": idx + 1, "id": h.get("id")})
+            page = meta.get("page", 0) or 0
+            # Prefer the larger parent context; fall back to the child text.
+            text = meta.get("parent_text") or h.get("document", "")
+            loc = f"第{page}页 " if page else ""
+            label = f"[来源: {name} {loc}#片段{idx + 1}]".replace("  ", " ").strip()
+            parts.append(f"{text}\n{label}")
+            sources.append(
+                {
+                    "file": name,
+                    "chunk": idx + 1,
+                    "page": page,
+                    "file_id": meta.get("file_id"),
+                    "id": h.get("id"),
+                    "text": text[:300],
+                }
+            )
         return "\n\n".join(parts), sources
 
     # ── Indexing ──────────────────────────────────────────────────────
@@ -216,20 +330,30 @@ class RAGService:
                 fr.chunks_count = 0
                 db.commit()
                 return 0
-            chunks = chunk_text(text)
-            if not chunks:
+            # Parent-child chunking (page-aware when the parser exposes pages).
+            items = chunk_parent_child(text, pages=parsed.get("pages"))
+            if not items:
                 fr.indexed = False
                 fr.chunks_count = 0
                 db.commit()
                 return 0
-            embeddings = self.embedding_service.embed(chunks)
+            children = [it["child"] for it in items]
+            parents = [it["parent"] for it in items]
+            pages_l = [it["page"] for it in items]
+            embeddings = self.embedding_service.embed(children)
             self.vector_store.add_document(
-                fr.user_id, fr.id, fr.original_name, chunks, embeddings
+                fr.user_id,
+                fr.id,
+                fr.original_name,
+                children,
+                embeddings,
+                parent_texts=parents,
+                pages=pages_l,
             )
             fr.indexed = True
-            fr.chunks_count = len(chunks)
+            fr.chunks_count = len(children)
             db.commit()
-            return len(chunks)
+            return len(children)
         finally:
             db.close()
 
