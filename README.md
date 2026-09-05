@@ -3,6 +3,16 @@
 </p>
 
 <p align="center">
+  <a href="https://researchpal-inky.vercel.app">
+    <img src="https://img.shields.io/badge/%F0%9F%9A%80%20%E5%9C%A8%E7%BA%BF%20Demo-researchpal--inky.vercel.app-1A56E8?style=for-the-badge&logo=vercel&logoColor=white" alt="在线 Demo">
+  </a>
+  &nbsp;
+  <a href="https://github.com/AAly030120/ResearchPal">
+    <img src="https://img.shields.io/badge/GitHub-%E6%BA%90%E7%A0%81-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub 源码">
+  </a>
+</p>
+
+<p align="center">
   <a href="#-快速开始"><strong>▶ 本地一键体验（无需 API Key）</strong></a>
   &nbsp;·&nbsp;
   <a href="docs/PRODUCT.md">📋 产品决策</a>

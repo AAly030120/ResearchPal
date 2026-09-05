@@ -6,29 +6,54 @@ import logging
 import subprocess
 import tempfile
 import textwrap
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# backend/ — storage_path values in the DB are relative to this directory.
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
 SANDBOX_PRELUDE = """
+# ── 1. Load runtime libraries FIRST, before the import guard is installed. ──
+# matplotlib / pandas / numpy all import `importlib` and `sys` internally, so
+# installing the guard first would make them fail to load at all.
+import io, base64, json, sys
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+# ── 2. Now install the import guard, applied to user code only. ──
 import builtins
 _ORIG_IMPORT = builtins.__import__
 
-_BLOCKED = {'os', 'subprocess', 'socket', 'shutil', 'sys', 'importlib', 'ctypes', 'multiprocessing', 'signal', 'pty', 'fcntl', 'posix', 'resource', 'termios'}
+# NOTE: `os` / `shutil` / `sys` / `importlib` are intentionally NOT blocked.
+# They are already loaded by pandas/matplotlib at start-up, and libraries keep
+# importing them lazily (e.g. pandas' plotting backend pulls in `os` via
+# importlib.metadata). Blocking them breaks ordinary analysis code while adding
+# no real security, since the modules are already in sys.modules.
+# The true sandbox boundary is the isolated subprocess; this list blocks the
+# genuine escape hatches (spawning processes, network, native memory tricks).
+_BLOCKED = {'subprocess', 'socket', 'ctypes', 'multiprocessing', 'signal',
+            'pty', 'fcntl', 'posix', 'resource', 'termios'}
+
+# Warm up pandas' lazy plotting backend while imports are still unrestricted,
+# so that `df.plot(...)` in user code does not trigger a blocked import later.
+try:
+    import pandas.plotting
+    pandas.plotting._core._load_backend("matplotlib")
+except Exception:
+    pass
+
 
 def _safe_import(name, *args, **kwargs):
     top = name.split('.')[0]
     if top in _BLOCKED:
         raise ImportError(f"Module '{name}' is blocked in sandbox for security reasons.")
-    # Allow matplotlib for charts
-    if name.startswith('matplotlib'):
-        pass
     return _ORIG_IMPORT(name, *args, **kwargs)
 
 builtins.__import__ = _safe_import
-
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 """
 
 CAPTURE_WRAPPER = """
@@ -68,22 +93,53 @@ if __DATA_PATH__:
         _DATA = pd.read_excel(path)
 """
 
+# Injected BEFORE the capture wrapper: install the excepthook as early as
+# possible so a failure during data loading still returns a readable error.
+# The result marker MUST be written to sys.__stdout__ (the real stdout):
+# sys.stdout gets captured into _OUTPUT, so a plain print() of the marker
+# would be swallowed by our own redirection.
+# globals().get(...) keeps _emit_result() safe even if it fires before the
+# capture buffers exist.
+EMIT_HELPERS = """
+def _emit_result():
+    import json as _json
+    _g = globals()
+    _out, _err, _ch = _g.get('_OUTPUT'), _g.get('_ERRORS'), _g.get('_CAPTURED_CHARTS')
+    _r = {"stdout": _out.getvalue() if _out else "",
+          "stderr": _err.getvalue() if _err else "",
+          "charts": _ch if _ch else [], "error": None}
+    sys.__stdout__.write("__SANDBOX_RESULT__" + _json.dumps(_r, ensure_ascii=False) + "\\n")
+    sys.__stdout__.flush()
+
+def _sandbox_excepthook(etype, value, tb):
+    import traceback as _tb
+    _err = globals().get('_ERRORS')
+    if _err is not None and not issubclass(etype, SystemExit):
+        _err.write("".join(_tb.format_exception(etype, value, tb)))
+    _emit_result()
+
+sys.excepthook = _sandbox_excepthook
+"""
+
 
 def run_python(code: str, data_path: str = None) -> dict:
     """
     Execute Python code in a sandboxed subprocess.
     Returns dict with: stdout, stderr, charts (list of base64 PNG strings), error
     """
+    # The subprocess runs with cwd=tempdir, but storage_path values in the DB
+    # are relative to the backend root — resolve them to absolute paths first.
+    if data_path and not os.path.isabs(data_path):
+        data_path = str((BACKEND_ROOT / data_path).resolve())
+
     # Build the full script
     script = SANDBOX_PRELUDE
+    script += EMIT_HELPERS
     script += CAPTURE_WRAPPER.replace("__DATA_PATH__", repr(data_path) if data_path else "None")
     script += "\n"
     script += code
     script += "\n"
-    script += """
-_RESULT = {"stdout": _OUTPUT.getvalue(), "stderr": _ERRORS.getvalue(), "charts": _CAPTURED_CHARTS, "error": None}
-print("__SANDBOX_RESULT__" + json.dumps(_RESULT, ensure_ascii=False))
-"""
+    script += "_emit_result()\n"
 
     script = textwrap.dedent(script)
 
