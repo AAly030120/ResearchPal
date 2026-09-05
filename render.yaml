@@ -11,7 +11,25 @@
 #
 # 注意：若使用「手动 Web Service」（非 Blueprint）部署，本文件的
 # envVars 不会被读取，需在 Render 面板该服务的 Environment 中
-# 再手动添加一次 PYTHON_VERSION=3.11.9。
+# 再手动添加一次 PYTHON_VERSION=3.11.9 与下方环境变量。
+#
+# ── 持久化说明（重要）─────────────────────────────────────────
+# Render 的 Free 实例文件系统是「临时」的：每次重启/冷启动，本地磁盘
+# （uploads/、outputs/、chroma_store/、以及 SQLite 库文件）都会被清空。
+# 因此：
+#   • 结构化数据（账号/文件元数据/对话/任务）→ 用下面的 Postgres（独立托管
+#     服务，不受实例重启影响），DATABASE_URL 由 Render 自动注入；
+#   • 上传文件原始字节 → 存进 Postgres 的 BYTEA 列（File.data），重启后由
+#     materialize_file() 自动从 BLOB 还原到磁盘，无需重新上传；
+#   • Chroma 向量库 → 重启后由后台 self-heal 自动从还原的文件重建。
+# 想要 uploads/outputs/chroma_store 完全不丢，需升级到付费 Starter 并挂载
+# Persistent Disk（Free 方案不含持久卷）。
+
+databases:
+  - name: researchpal-db
+    databaseName: researchpal
+    user: researchpal
+    plan: free
 
 services:
   # ── Backend API ──
@@ -28,7 +46,9 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: researchpal-db
+          property: connectionString
       - key: CORS_ORIGINS
         sync: false
       - key: DEBUG

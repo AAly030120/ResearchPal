@@ -151,6 +151,13 @@ async def chunk_upload_complete(
         version=new_version,
         version_group=version_group,
     )
+    # Persist raw bytes in the DB so the document survives an ephemeral-disk
+    # restart (the DB itself — Postgres — outlives the local filesystem).
+    try:
+        with open(storage_path, "rb") as _f:
+            file_record.data = _f.read()
+    except OSError:
+        file_record.data = None
     db.add(file_record)
     db.commit()
     db.refresh(file_record)
@@ -237,6 +244,9 @@ async def upload_file(
         version=new_version,
         version_group=version_group,
     )
+    # Persist raw bytes in the DB so the document survives an ephemeral-disk
+    # restart (the DB itself — Postgres — outlives the local filesystem).
+    file_record.data = content
     db.add(file_record)
     db.commit()
     db.refresh(file_record)
@@ -309,11 +319,14 @@ async def download_file(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if not os.path.exists(file_record.storage_path):
-        raise HTTPException(status_code=404, detail="File not found on disk")
+    # Materialize from DB BLOB if the on-disk copy was wiped by a restart.
+    from app.services.storage import materialize_file
+    resolved = materialize_file(file_record)
+    if not resolved or not os.path.exists(resolved):
+        raise HTTPException(status_code=404, detail="File content unavailable")
 
     return FastAPIFileResponse(
-        path=file_record.storage_path,
+        path=resolved,
         filename=file_record.original_name,
         media_type="application/octet-stream",
     )
@@ -331,6 +344,11 @@ async def preview_file(
     file_record = db.query(File).filter(File.id == file_id, File.user_id == current_user.id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
+
+    if not os.path.exists(file_record.storage_path):
+        # Try to restore from DB BLOB (ephemeral-disk restart recovery).
+        from app.services.storage import materialize_file
+        materialize_file(file_record)
 
     if not os.path.exists(file_record.storage_path):
         raise HTTPException(status_code=404, detail="File not found on disk")

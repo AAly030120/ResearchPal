@@ -116,6 +116,20 @@ class VectorStore:
             logger.warning("count_for_user error: %s", e)
             return 0
 
+    def count_for_file(self, user_id: str, file_id: str) -> int:
+        """Number of vector chunks stored for a specific file (0 if none)."""
+        if not _chroma_available():
+            return 0
+        try:
+            col = self._get_collection()
+            res = col.get(
+                where={"user_id": user_id, "file_id": file_id}, limit=1, include=[]
+            )
+            return len(res.get("ids", []))
+        except Exception as e:
+            logger.warning("count_for_file error: %s", e)
+            return 0
+
     def search(
         self,
         user_id: str,

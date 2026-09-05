@@ -119,7 +119,8 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
                 indexed_attached_ids.append(fid)
                 continue
             try:
-                parsed = extract_text(file_record.id, file_record.storage_path, file_record.file_type)
+                from app.services.storage import materialize_file
+                parsed = extract_text(file_record.id, materialize_file(file_record), file_record.file_type)
                 file_content = parsed.get("text", "")[:30000]
                 if file_content:
                     meta_parts = [f"文件名: {file_record.original_name}", f"类型: {file_record.file_type}"]

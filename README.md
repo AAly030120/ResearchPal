@@ -191,6 +191,25 @@ researchpal/
 
 ---
 
+## 部署（Render + Postgres 持久化）
+
+> **为什么需要 Postgres？** Render 的 Free 实例文件系统是**临时**的：每次重启 / 冷启动，本地磁盘（`uploads/`、`outputs/`、`chroma_store/`、以及默认的 SQLite 库文件）都会被清空。这会造成「注册的账号、对话记录、已索引文献全部丢失」——正是早期 SQLite 方案的致命问题。
+
+解决方式（已内置，开箱即用）：
+
+1. **结构化数据 → Postgres**：通过 `DATABASE_URL` 接入 Render 免费 Postgres（独立托管服务，不受实例重启影响），账号、文件元数据、对话、任务全部持久化。
+   - **Blueprint 部署**：`render.yaml` 已声明 `databases` 并用 `fromDatabase` 自动注入 `DATABASE_URL`，无需手动配置。
+   - **手动 Web Service**：在 Render 控制台为该服务添加 Postgres 插件，并设环境变量 `DATABASE_URL=<连接串>`。
+2. **上传文件原始字节 → 存进 Postgres `BYTEA`**：`File.data` 列保存文件内容，重启后由 `materialize_file()` 自动从 BLOB 还原到磁盘，无需重新上传。
+3. **Chroma 向量库 → 启动自愈**：向量存在临时磁盘，重启会被清空；服务启动后后台线程 `heal_indexes()` 会自动为「标记为已索引但向量缺失」的文件重建索引。
+4. **完全不丢盘（可选，付费）**：升级到 Starter 方案并挂载 **Persistent Disk**，将磁盘挂到后端工作目录，则 `uploads/`、`outputs/`、`chroma_store/` 全部持久化（代码无需改动，相对路径已适配）。
+
+前端部署：Vercel 导入本仓库前端（`frontend/`），构建命令 `npm run build`、输出目录 `out`、环境变量 `NEXT_PUBLIC_API_URL=<后端地址>`。
+
+> **注意**：Render 免费 Postgres 有「90 天无访问自动暂停/删除」策略，面试演示前请先访问一次后端 `/api/health` 唤醒。
+
+---
+
 ## 文档导航
 
 - [PRODUCT.md](docs/PRODUCT.md) — 用户研究、功能优先级、模型选型成本权衡、成功指标、AI 安全与学术诚信

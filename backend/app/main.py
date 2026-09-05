@@ -31,26 +31,66 @@ async def lifespan(app: FastAPI):
     logger.info("Creating database tables...")
     Base.metadata.create_all(bind=engine)
 
-    # SQLite-specific migrations (skip for PostgreSQL — use Alembic instead)
-    if settings.is_sqlite:
-        from sqlalchemy import text
-        migrations = [
-            ("ALTER TABLE messages ADD COLUMN file_id VARCHAR(36) REFERENCES files(id)", "file_id on messages"),
-            ("ALTER TABLE files ADD COLUMN version INTEGER DEFAULT 1", "version on files"),
-            ("ALTER TABLE files ADD COLUMN version_group VARCHAR(36)", "version_group on files"),
-            ("ALTER TABLE files ADD COLUMN indexed BOOLEAN DEFAULT 0", "indexed on files"),
-            ("ALTER TABLE files ADD COLUMN chunks_count INTEGER DEFAULT 0", "chunks_count on files"),
-        ]
-        with engine.connect() as conn:
-            for sql, name in migrations:
-                try:
-                    conn.execute(text(sql))
-                    conn.commit()
-                    logger.info(f"Migration OK: {name}")
-                except Exception:
-                    pass  # column already exists
+    # Idempotent schema migrations — engine-agnostic. create_all() already adds
+    # the columns on a fresh DB, so each ALTER is guarded by a column-existence
+    # check and only runs when the column is genuinely missing.
+    from sqlalchemy import text
+
+    data_type = "BYTEA" if not settings.is_sqlite else "BLOB"
+    column_adds = [
+        ("messages", "file_id", "ALTER TABLE messages ADD COLUMN file_id VARCHAR(36) REFERENCES files(id)"),
+        ("files", "version", "ALTER TABLE files ADD COLUMN version INTEGER DEFAULT 1"),
+        ("files", "version_group", "ALTER TABLE files ADD COLUMN version_group VARCHAR(36)"),
+        ("files", "indexed", "ALTER TABLE files ADD COLUMN indexed BOOLEAN DEFAULT 0"),
+        ("files", "chunks_count", "ALTER TABLE files ADD COLUMN chunks_count INTEGER DEFAULT 0"),
+        ("files", "data", f"ALTER TABLE files ADD COLUMN data {data_type}"),
+    ]
+    with engine.connect() as conn:
+        for table, column, sql in column_adds:
+            if _column_exists(engine, table, column):
+                continue
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+                logger.info(f"Migration OK: {table}.{column}")
+            except Exception as e:
+                logger.warning(f"Migration skipped for {table}.{column}: {e}")
     logger.info("Database tables ready.")
+
+    # Self-heal RAG vectors after an ephemeral-disk restart. The Postgres rows
+    # (and file BLOBs) survive, but the Chroma store is wiped — rebuild it in the
+    # background so retrieval works again without manual re-indexing.
+    import threading
+
+    def _startup_heal():
+        try:
+            from app.services.rag_service import rag_service
+            rag_service.heal_indexes()
+        except Exception as e:
+            logger.warning("startup RAG heal failed: %s", e)
+
+    threading.Thread(target=_startup_heal, daemon=True).start()
+
     yield
+
+
+def _column_exists(engine, table: str, column: str) -> bool:
+    """Cross-engine check for column existence."""
+    try:
+        with engine.connect() as c:
+            if "sqlite" in str(engine.url):
+                rows = c.execute(text(f"PRAGMA table_info({table})")).fetchall()
+                return any(str(r[1]).lower() == column.lower() for r in rows)
+            res = c.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name=:t AND column_name=:c"
+                ),
+                {"t": table, "c": column},
+            ).fetchone()
+            return res is not None
+    except Exception:
+        return False
 
 
 app = FastAPI(

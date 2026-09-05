@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Boolean, func
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Boolean, LargeBinary, func
 from app.models.database import Base
 
 def gen_uuid():
@@ -22,6 +22,11 @@ class File(Base):
     # RAG: whether the file has been embedded into the vector store
     indexed = Column(Boolean, default=False)
     chunks_count = Column(Integer, default=0)
+    # Raw bytes of the uploaded file. Stored in DB so documents survive an
+    # ephemeral-filesystem restart (e.g. Render Free) — the DB (Postgres)
+    # persists even when the local disk is wiped. materialize_file() restores
+    # the on-disk copy from this BLOB on demand.
+    data = Column(LargeBinary, nullable=True)
 
 
 class Task(Base):

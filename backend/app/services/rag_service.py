@@ -19,6 +19,7 @@ import jieba
 from app.core.config import settings
 from app.services.embedding_service import embedding_service
 from app.services.vector_store import vector_store
+from app.services.storage import materialize_file
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ class RAGService:
                 db.commit()
                 return 0
             try:
-                parsed = extract_text(fr.id, fr.storage_path, fr.file_type)
+                parsed = extract_text(fr.id, materialize_file(fr), fr.file_type)
             except Exception as e:
                 logger.warning("index_file extract failed for %s: %s", file_id, e)
                 fr.indexed = False
@@ -245,6 +246,37 @@ class RAGService:
 
     def remove_index(self, file_id: str) -> None:
         self.vector_store.delete_document(file_id)
+
+    def heal_indexes(self) -> int:
+        """Re-index files flagged ``indexed`` but missing vectors.
+
+        After an ephemeral-disk restart the Chroma store is wiped while the
+        Postgres rows (and the file BLOBs) survive — so we rebuild vectors from
+        the restored on-disk copies. Returns the number of files re-indexed.
+        """
+        from app.models.database import SessionLocal
+        from app.models import File
+
+        db = SessionLocal()
+        healed = 0
+        try:
+            flagged = (
+                db.query(File)
+                .filter(File.indexed == True, File.file_type.in_(INDEXABLE_TYPES))
+                .all()
+            )
+            for f in flagged:
+                try:
+                    if self.vector_store.count_for_file(f.user_id, f.id) == 0:
+                        self.index_file_sync(f.id)
+                        healed += 1
+                except Exception as e:
+                    logger.warning("heal_indexes: reindex failed for %s: %s", f.id, e)
+        finally:
+            db.close()
+        if healed:
+            logger.info("heal_indexes: re-indexed %d files", healed)
+        return healed
 
 
 rag_service = RAGService()
