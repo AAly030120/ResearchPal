@@ -308,7 +308,7 @@ class ApiClient {
     endpoint: string,
     data: any,
     onChunk: (text: string) => void,
-    onDone: (convId?: string) => void,
+    onDone: (convId?: string, retrievedCount?: number) => void,
     onError: (err: string) => void,
     signal?: AbortSignal,
   ): AbortController {
@@ -348,7 +348,7 @@ class ApiClient {
                 try {
                   const parsed = JSON.parse(raw);
                   if (parsed.chunk) onChunk(parsed.chunk);
-                  if (parsed.done) onDone(parsed.conversation_id);
+                  if (parsed.done) onDone(parsed.conversation_id, parsed.retrieved_count);
                   if (parsed.error && parsed.chunk) onError(parsed.chunk);
                 } catch {}
               }

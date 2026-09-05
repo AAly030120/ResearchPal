@@ -37,9 +37,16 @@ backend/outputs/*
 /skills/
 backend/skills/
 
+# ── RAG vector store (Chroma, runtime-generated) ──
+backend/chroma_store/
+chroma_store/
+
 # ── ppt-master build probes (temp) ──
 backend/.pptx-build-*/
 
 # ── Local dev: auth bootstrap used only for tooling screenshots ──
 frontend/public/_auth*.html
 backend/tmp_*.py
+
+# TypeScript build info
+frontend/tsconfig.tsbuildinfo

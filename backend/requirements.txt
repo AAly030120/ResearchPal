@@ -24,3 +24,6 @@ aiohttp==3.10.9
 psycopg2-binary==2.9.10
 jieba==0.42.1
 slowapi==0.1.9
+# ── RAG (Retrieval-Augmented Generation) ──
+chromadb==0.5.5
+fastembed==0.5.0

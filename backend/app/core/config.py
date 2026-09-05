@@ -62,6 +62,28 @@ class Settings(BaseSettings):
     # ── Default model ──
     DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
 
+    # ── RAG (Retrieval-Augmented Generation) ──
+    # Embedding provider: "auto" (dashscope if QWEN_API_KEY present else local),
+    # "local" (fastembed, offline, no API key), or "dashscope" (Aliyun text-embedding-v3).
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "auto")
+    # Local embedding model (fastembed registry name). Chinese-strong, tiny (~30MB).
+    RAG_EMBEDDING_MODEL: str = os.getenv("RAG_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+    # DashScope embedding model id (compatible-mode OpenAI embeddings endpoint).
+    DASHSCOPE_EMBED_MODEL: str = os.getenv("DASHSCOPE_EMBED_MODEL", "text-embedding-v3")
+    # Persisted Chroma vector store directory (relative to backend cwd).
+    CHROMA_DIR: str = os.getenv("CHROMA_DIR", os.path.join("chroma_store"))
+    # Chunking
+    RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "700"))
+    RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "120"))
+    # Retrieval
+    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "15"))        # candidates from vector store
+    RAG_TOP_N: int = int(os.getenv("RAG_TOP_N", "6"))         # chunks injected after rerank
+    # Hybrid rerank weights (vector similarity + jieba keyword overlap)
+    RAG_VECTOR_WEIGHT: float = float(os.getenv("RAG_VECTOR_WEIGHT", "0.6"))
+    RAG_KEYWORD_WEIGHT: float = float(os.getenv("RAG_KEYWORD_WEIGHT", "0.4"))
+    # Minimum combined rerank score to inject a chunk as context (filters noise).
+    RAG_MIN_SCORE: float = float(os.getenv("RAG_MIN_SCORE", "0.2"))
+
     class Config:
         env_file = ".env"
 

@@ -17,6 +17,7 @@ from app.schemas.chat import (
 )
 from app.services.llm_service import llm_service
 from app.services.file_parser import extract_text
+from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -96,9 +97,13 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
         db.commit()
         db.refresh(conv)
 
+    # Determine whether to use RAG retrieval augmentation.
+    use_rag = body.use_rag if body.use_rag is not None else True
+
     # Parse attached files if any
     file_context = ""
     attached_file_ids: list[str] = []
+    indexed_attached_ids: list[str] = []
     if body.file_ids:
         attached_file_ids = body.file_ids
         for fid in body.file_ids:
@@ -106,6 +111,12 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
                 File.id == fid, File.user_id == current_user.id
             ).first()
             if not file_record:
+                continue
+            # Files already indexed into the vector store are covered by RAG
+            # retrieval (restricted to these files) — skip the legacy full-text
+            # dump for them to save tokens and avoid duplication.
+            if file_record.indexed:
+                indexed_attached_ids.append(fid)
                 continue
             try:
                 parsed = extract_text(file_record.id, file_record.storage_path, file_record.file_type)
@@ -152,10 +163,36 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
             content = m.content + file_context
         llm_messages.append({"role": m.role, "content": content})
 
+    # ── RAG retrieval augmentation ────────────────────────────────────
+    # Retrieve relevant chunks from the user's indexed documents and inject
+    # them as a system prompt with citation instructions. When specific files
+    # are attached and already indexed, restrict retrieval to those files.
+    rag_context = ""
+    retrieved_count = 0
+    if use_rag and llm_service._has_key(model) and rag_service.has_documents(current_user.id):
+        try:
+            file_ids_filter = indexed_attached_ids if indexed_attached_ids else None
+            hits = rag_service.retrieve(current_user.id, body.message, file_ids=file_ids_filter)
+            if hits:
+                rag_context, _sources = rag_service.format_context(hits)
+                retrieved_count = len(hits)
+        except Exception as e:
+            logger.warning(f"RAG retrieval failed (continuing without): {e}")
+            rag_context = ""
+
+    system_prompt = None
+    if rag_context:
+        system_prompt = (
+            "你是一个严谨的科研文献助手。请严格依据下方【检索到的文献片段】作答；"
+            "若片段信息不足以回答，请明确说明“根据提供的资料无法回答”，不要编造或引入片段之外的知识。"
+            "回答时请使用 [来源: 文件名 #片段N] 格式标注引用。\n\n"
+            f"【检索到的文献片段】\n{rag_context}"
+        )
+
     async def stream_response():
         full_response = ""
         try:
-            async for chunk in llm_service.chat_stream(model, llm_messages):
+            async for chunk in llm_service.chat_stream(model, llm_messages, system_prompt=system_prompt):
                 full_response += chunk
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
         except Exception as e:
@@ -169,7 +206,7 @@ async def send_message(body: ChatRequest, current_user: User = Depends(get_curre
         db.add(assistant_msg)
         conv.updated_at = datetime.now(timezone.utc)
         db.commit()
-        yield f"data: {json.dumps({'done': True, 'conversation_id': conv.id})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'conversation_id': conv.id, 'retrieved_count': retrieved_count})}\n\n"
 
     return StreamingResponse(
         stream_response(),

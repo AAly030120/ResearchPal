@@ -17,6 +17,8 @@ interface FileItem {
   uploaded_at: string;
   version: number;
   version_group?: string;
+  indexed?: boolean;
+  chunks_count?: number;
 }
 
 interface TaskItem {
@@ -81,6 +83,26 @@ export default function DashboardPage() {
   const [error, setError] = useState('');
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [ragStatus, setRagStatus] = useState<{ provider?: string; total_indexed_chunks?: number; indexed_files?: number } | null>(null);
+  const [indexingAll, setIndexingAll] = useState(false);
+  const [reindexingId, setReindexingId] = useState<string | null>(null);
+
+  // File types that can be embedded & retrieved via RAG.
+  const INDEXABLE = new Set(['pdf', 'docx', 'txt', 'md', 'pptx']);
+
+  const loadRagStatus = useCallback(async () => {
+    if (!user) return;
+    try {
+      const data = await api.get('/api/rag/status');
+      setRagStatus({
+        provider: data.provider,
+        total_indexed_chunks: data.total_indexed_chunks,
+        indexed_files: data.indexed_files,
+      });
+    } catch {
+      /* RAG status is best-effort */
+    }
+  }, [user]);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -95,7 +117,32 @@ export default function DashboardPage() {
       .catch((err: any) => errors.push(`任务列表: ${err.message}`));
     if (errors.length > 0) setError(errors.join('; '));
     setLoading(false);
-  }, [user]);
+    loadRagStatus();
+  }, [user, loadRagStatus]);
+
+  const handleReindex = async (fileId: string) => {
+    setReindexingId(fileId);
+    try {
+      await api.post(`/api/rag/index/${fileId}`, {});
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || '索引失败');
+    } finally {
+      setReindexingId(null);
+    }
+  };
+
+  const handleIndexAll = async () => {
+    setIndexingAll(true);
+    try {
+      await api.post('/api/rag/index-all', {});
+      await loadData();
+    } catch (err: any) {
+      setError(err.message || '索引失败');
+    } finally {
+      setIndexingAll(false);
+    }
+  };
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -170,6 +217,25 @@ export default function DashboardPage() {
 
       {error && <div className="bg-red-50 text-red-600 text-sm p-4 rounded-xl mb-6">{error} <button onClick={loadData} className="ml-2 underline">{t('common.retry')}</button></div>}
 
+      {activeTab === 'files' && (
+        <div className="flex items-center justify-between mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+          <div className="text-sm text-emerald-800">
+            <span className="font-medium">检索增强 (RAG)：</span>
+            {ragStatus
+              ? `已索引 ${ragStatus.indexed_files ?? 0} 个文件 / ${ragStatus.total_indexed_chunks ?? 0} 个片段（向量模型：${ragStatus.provider}）`
+              : '加载中…'}
+            <span className="text-emerald-600 ml-1">支持 PDF / DOCX / TXT / MD / PPTX</span>
+          </div>
+          <button
+            onClick={handleIndexAll}
+            disabled={indexingAll}
+            className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          >
+            {indexingAll ? '索引中…' : '重新索引全部'}
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-20 text-gray-500">{t('common.loading')}</div>
       ) : activeTab === 'files' ? (
@@ -187,6 +253,16 @@ export default function DashboardPage() {
                       <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
                         v{file.version}
                       </span>
+                    )}
+                    {INDEXABLE.has(file.file_type) && (
+                      file.indexed ? (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3.1 3.1 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" /></svg>
+                          已索引{file.chunks_count ? ` · ${file.chunks_count}` : ''}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">未索引</span>
+                      )
                     )}
                   </div>
                   <button onClick={() => handleDeleteFile(file.id)} className="text-gray-400 hover:text-red-500 transition-colors" title="Delete">
@@ -249,6 +325,21 @@ export default function DashboardPage() {
                     </svg>
                     {copiedId === file.id ? '已复制' : '分享'}
                   </button>
+
+                  {/* Re-index (RAG) */}
+                  {INDEXABLE.has(file.file_type) && (
+                    <button
+                      onClick={() => handleReindex(file.id)}
+                      disabled={reindexingId === file.id}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 rounded-lg hover:bg-emerald-50 hover:text-emerald-600 transition-colors disabled:opacity-50"
+                      title={file.indexed ? '重新建立索引' : '建立索引以启用检索增强'}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.5-3.5L20 8M20 15a9 9 0 01-14.5 3.5L4 16" />
+                      </svg>
+                      {reindexingId === file.id ? '索引中' : (file.indexed ? '重索引' : '索引')}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

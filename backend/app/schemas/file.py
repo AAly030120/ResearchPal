@@ -12,6 +12,8 @@ class FileResponse(BaseModel):
     uploaded_at: datetime
     version: int = 1
     version_group: Optional[str] = None
+    indexed: bool = False
+    chunks_count: int = 0
 
     model_config = {"from_attributes": True}
 

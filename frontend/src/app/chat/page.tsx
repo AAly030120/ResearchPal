@@ -40,6 +40,8 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [showUploader, setShowUploader] = useState(false);
+  const [useRag, setUseRag] = useState(true);
+  const [retrievedCount, setRetrievedCount] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -136,6 +138,7 @@ export default function ChatPage() {
     setInput('');
     setStreaming(true);
     setStreamText('');
+    setRetrievedCount(null);
 
     const displayContent = text || (attachedFiles.length > 0 ? `[发送了 ${attachedFiles.length} 个文件]` : '');
 
@@ -159,12 +162,13 @@ export default function ChatPage() {
         conversation_id: activeConvId || undefined,
         message: text || '请分析这些文件的内容',
         file_ids: currentFileIds.length > 0 ? currentFileIds : undefined,
+        use_rag: useRag,
       },
       (chunk: string) => {
         fullResponse += chunk;
         setStreamText(fullResponse);
       },
-      (convId?: string) => {
+      (convId?: string, retrieved?: number) => {
         const assistantMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
@@ -174,6 +178,7 @@ export default function ChatPage() {
         setMessages((prev) => [...prev, assistantMsg]);
         setStreamText('');
         setStreaming(false);
+        setRetrievedCount(retrieved ?? null);
         abortRef.current = null;
         if (convId && !activeConvId) {
           setActiveConvId(convId);
@@ -313,6 +318,16 @@ export default function ChatPage() {
 
         {/* Input Area */}
         <div className="p-4 border-t border-gray-200 bg-white">
+          {/* RAG retrieval status */}
+          {retrievedCount != null && retrievedCount > 0 && (
+            <div className="mb-2 flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5 w-fit">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              本次回答基于 {retrievedCount} 个检索到的文献片段
+            </div>
+          )}
+
           {/* File upload drop zone */}
           {showUploader && (
             <div className="mb-3">
@@ -348,6 +363,24 @@ export default function ChatPage() {
           )}
 
           <div className="flex items-end gap-2">
+            {/* RAG retrieval-augmentation toggle */}
+            <button
+              type="button"
+              onClick={() => setUseRag(!useRag)}
+              className={`px-3 py-3 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 ${
+                useRag
+                  ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+              title={useRag ? '检索增强已开启：回答将基于你已索引的文献' : '检索增强已关闭'}
+              disabled={streaming}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 18a7 7 0 110-14 7 7 0 010 14z" />
+              </svg>
+              RAG
+            </button>
+
             {/* File attach button */}
             <button
               type="button"

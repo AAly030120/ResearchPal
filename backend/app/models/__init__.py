@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, func
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Boolean, func
 from app.models.database import Base
 
 def gen_uuid():
@@ -19,6 +19,9 @@ class File(Base):
     version = Column(Integer, default=1)
     # group key for same-original-name files to track version history
     version_group = Column(String(36), nullable=True)
+    # RAG: whether the file has been embedded into the vector store
+    indexed = Column(Boolean, default=False)
+    chunks_count = Column(Integer, default=0)
 
 
 class Task(Base):

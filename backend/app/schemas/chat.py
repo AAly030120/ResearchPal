@@ -44,3 +44,4 @@ class ChatRequest(BaseModel):
     message: str
     file_ids: Optional[list[str]] = None  # Support multiple file uploads
     model: Optional[str] = None
+    use_rag: Optional[bool] = True  # Enable RAG retrieval augmentation over indexed documents

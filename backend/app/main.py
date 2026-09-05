@@ -17,7 +17,7 @@ from app.core.security import get_current_user
 from app.models.database import engine, Base, get_db
 from app.models import File, Task, Conversation, Message, UserProfile  # noqa: ensure models are registered
 from app.models.user import User
-from app.api import auth, files, tasks, chat, settings as settings_api
+from app.api import auth, files, tasks, chat, settings as settings_api, rag as rag_api
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI):
             ("ALTER TABLE messages ADD COLUMN file_id VARCHAR(36) REFERENCES files(id)", "file_id on messages"),
             ("ALTER TABLE files ADD COLUMN version INTEGER DEFAULT 1", "version on files"),
             ("ALTER TABLE files ADD COLUMN version_group VARCHAR(36)", "version_group on files"),
+            ("ALTER TABLE files ADD COLUMN indexed BOOLEAN DEFAULT 0", "indexed on files"),
+            ("ALTER TABLE files ADD COLUMN chunks_count INTEGER DEFAULT 0", "chunks_count on files"),
         ]
         with engine.connect() as conn:
             for sql, name in migrations:
@@ -72,6 +74,7 @@ app.include_router(files.router)
 app.include_router(tasks.router)
 app.include_router(chat.router)
 app.include_router(settings_api.router)
+app.include_router(rag_api.router)
 
 # Apply global rate limiting middleware (in-memory; safe for single-instance deploy)
 app.state.limiter = limiter

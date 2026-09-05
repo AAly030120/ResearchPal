@@ -26,6 +26,19 @@ from app.schemas.file import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
 
+
+def _schedule_indexing(file_id: str) -> None:
+    """Kick off background RAG indexing for a freshly uploaded file.
+
+    Runs after the HTTP response is returned (fire-and-forget) so uploads stay
+    fast. Failures are logged and do not affect the upload result.
+    """
+    try:
+        from app.services.rag_service import rag_service
+        rag_service.schedule_index(file_id)
+    except Exception as e:
+        logger.warning(f"Could not schedule indexing for {file_id}: {e}")
+
 ALLOWED_EXTENSIONS = {
     ".pdf", ".docx", ".doc", ".txt", ".md", ".csv",
     ".xlsx", ".xls", ".py", ".json", ".log", ".pptx",
@@ -143,6 +156,7 @@ async def chunk_upload_complete(
     db.refresh(file_record)
 
     logger.info(f"Chunked upload complete: {session['filename']} v{new_version}")
+    _schedule_indexing(file_record.id)
     return FileResponse.model_validate(file_record)
 
 
@@ -227,6 +241,7 @@ async def upload_file(
     db.commit()
     db.refresh(file_record)
 
+    _schedule_indexing(file_record.id)
     return FileResponse.model_validate(file_record)
 
 
@@ -268,6 +283,13 @@ async def delete_file(
             os.remove(file_record.storage_path)
     except OSError as e:
         logger.warning(f"Could not delete file from disk: {e}")
+
+    # Remove any RAG vectors indexed from this file.
+    try:
+        from app.services.rag_service import rag_service
+        rag_service.remove_index(file_record.id)
+    except Exception as e:
+        logger.warning(f"Could not remove RAG index for {file_id}: {e}")
 
     db.delete(file_record)
     db.commit()
