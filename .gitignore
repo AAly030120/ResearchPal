@@ -50,3 +50,9 @@ backend/tmp_*.py
 
 # TypeScript build info
 frontend/tsconfig.tsbuildinfo
+
+# ── Local-only interview prep / resume drafts (NEVER push — for candidate's eyes only) ──
+docs/INTERVIEW_LIFECYCLE.md
+docs/*_PREP.md
+docs/RESUME_RESEARCHPAL.md
+*INTERVIEW_PREP*
