@@ -8,12 +8,27 @@
 
 ---
 
-## 一、要配什么（3 个环境变量）
+## 一、要配什么（手动 Web Service 必须 4 个变量）
 
-在 Render Dashboard → 你的 `researchpal-api` 服务 → **Environment** 里添加/修改：
+> ⚠️ **关键提醒**：你用的是 **Manual Web Service**（非 Blueprint 自动部署），所以 `render.yaml` 里的 `envVars` 和 `databases` **不会被 Render 自动读取**。因此 `DATABASE_URL` 与 `SECRET_KEY` 都不会自动注入，**必须手动在面板里加**。
+
+### 步骤 0：先确认 Postgres 数据库
+
+Render Dashboard 左侧 → **PostgreSQL**。如果你已经有一个 `researchpal-db`（或任何 Postgres）服务，点进去 → **Info** → **External Database URL** → 复制那串 `postgresql://...`。
+
+如果没有 Postgres 服务：
+1. 点击 **New +** → **PostgreSQL**，名字写 `researchpal-db`，plan 选 **Free**。
+2. 创建后复制 **External Database URL**。
+3. 把它加到后端服务的环境变量里（见下表）。
+
+### 步骤 1：给 `researchpal-api` 加环境变量
+
+Render Dashboard → 你的 `researchpal-api` 服务 → **Environment** 里添加/修改：
 
 | 变量 | 值 | 说明 |
 |---|---|---|
+| **`DATABASE_URL`** | 上面复制的 `postgresql://...` | **必须先设**。不配置会退回到 SQLite，文件存在 Render 临时磁盘，休眠后账号/文件全丢 |
+| `SECRET_KEY` | 任意强随机字符串，例如 `openssl rand -hex 32` | 生产模式(`DEBUG=false`)必须，否则后端拒绝启动。可在本地生成后粘贴 |
 | `OPENAI_API_KEY` | 你的 OpenAI Key | 默认模型 `gpt-4o-mini` 走这里。**至少要有一个 LLM Key**，否则会退回演示占位文案 |
 | `CORS_ORIGINS` | `https://researchpal-inky.vercel.app` | 前端域名（已配则忽略）。**不带尾斜杠** |
 | `SEED_DEMO` | `1` | 设为 `1` 后，服务每次冷启动会**自动预置演示账号**（见下），配一次永久生效 |
@@ -21,12 +36,8 @@
 可选补充：
 
 - 不想用 OpenAI，可改用 `DEEPSEEK_API_KEY` 或 `GLM_API_KEY`，并把 `DEFAULT_MODEL` 改成对应模型名（如 `deepseek-chat`）。
-- `SECRET_KEY` 与 `DATABASE_URL` 由 Render 自动注入，**不要手改**。
-- `render.yaml` 里 `OPENAI_API_KEY` / `CORS_ORIGINS` / `DEFAULT_MODEL` 标记为 `sync: false`——
-  即 Blueprint 不会自动写入，**必须在面板里手动加一次**（你用的是 Manual Web Service，本就不读 render.yaml 的 envVars）。
-
-> ⚠️ **配完 Key 后必须重新部署**：改 Environment 变量会触发一次新的 Build/Deploy。
-> 等 Deploy 变绿后再验证。
+- 改 Environment 变量后 Render 会**自动触发一次新的 Build/Deploy**，等 Deploy 变绿后再验证。
+- 如果之后看到 `sqlite3.OperationalError duplicate column name` 之类的日志，说明 `DATABASE_URL` 还是没配对、后端仍在用 SQLite；请回来检查这一步。
 
 ---
 
@@ -63,6 +74,12 @@ Demo seeding scheduled (SEED_DEMO=1)
 [+] 图谱已写入: ... (9 实体 / 11 关系)
 演示账号就绪
 ```
+
+如果还看到 `sqlite3.OperationalError duplicate column name`（你截图里的红色告警），
+说明 `DATABASE_URL` 没配对、后端仍在用 SQLite。请回到「步骤 0」把 Postgres 外部连接串填上并重新部署。
+
+你还会看到一条 `chromadb.telemetry.product.posthog Failed to send telemetry event` 的 ERROR——
+这是 ChromaDB 与新版 PostHog 兼容性的**上游已知问题**，不影响检索与建图，可以忽略。
 
 **B. 用演示账号走一遍检索（最稳的冒烟测试）**
 ```bash
