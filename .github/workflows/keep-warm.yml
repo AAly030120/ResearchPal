@@ -1,0 +1,37 @@
+name: Keep Demo Alive
+
+# Render Free 实例在 15 分钟无请求后会休眠，冷启动实测约 43 秒。
+# 这会让面试官点开 Demo 链接时白屏干等，是演示环节最大的体验风险。
+# 这里用 GitHub Actions 每 10 分钟唤醒一次后端，把冷启动消灭在演示之前。
+#
+# 说明：GitHub Actions 的 schedule 不保证精确执行（高峰期可能延迟数分钟），
+# 但对「15 分钟休眠窗口」来说 10 分钟间隔已足够安全。
+# 公开仓库的 Actions 额度免费且不限量。
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend
+        run: |
+          url="https://researchpal.onrender.com/openapi.json"
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$url" || echo "000")
+          echo "backend responded: $code"
+          # 保活任务用 warning 而非失败退出：避免后端临时抖动时反复推送失败邮件。
+          if [ "$code" != "200" ]; then
+            echo "::warning::backend warm-up returned $code (expected 200)"
+          fi
+
+      - name: Ping frontend
+        run: |
+          url="https://researchpal-inky.vercel.app"
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "$url" || echo "000")
+          echo "frontend responded: $code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::frontend warm-up returned $code (expected 200)"
+          fi

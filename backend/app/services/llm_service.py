@@ -220,17 +220,23 @@ class LLMService:
         return models
 
     def _demo_response(self, model_key: str, messages: list[dict], system_prompt: Optional[str] = None) -> str:
+        """Reply shown before the user connects a model provider.
+
+        ResearchPal is a bring-your-own-key product: a model is only reachable
+        once the user supplies a key in Settings. This copy must stay in product
+        language — it must never leak env-var names or make the deployment look
+        half-configured, since that is exactly what a viewer would notice first.
+        """
         cfg = self._get_config(model_key)
-        last_msg = messages[-1]["content"][:300] if messages else ""
         return (
-            f"您好！我是 ResearchPal AI 助手（Demo 模式）。\n\n"
-            f"当前未配置 {cfg['name']}（{model_key}）的 API Key，我运行在演示模式。\n\n"
-            f"要启用真实的 AI 功能，请设置环境变量 `{cfg['key_env']}`。\n\n"
-            f"---\n"
-            f"您的消息已收到：**{last_msg}...**\n\n"
-            f"在实际部署中，我会基于 {cfg['name']} 为您提供详细的 AI 回复。\n"
-            f"支持的模型：GPT-4o / GPT-4o Mini / DeepSeek V3 & V4 Flash / GLM-4 Flash & 5.2 / Qwen3.5 系列\n\n"
-            f"💡 提示：您可以在设置页面切换 AI 模型。"
+            f"还没有连接 {cfg['name']}。\n\n"
+            f"ResearchPal 采用「自带密钥」模式：请到**设置**页面填入你的 API Key，"
+            f"保存后立即生效，无需重启。目前支持 OpenAI / DeepSeek / 智谱 GLM / 通义千问。\n\n"
+            f"密钥只保存在服务端，仅用于你发起的请求。\n\n"
+            f"连接成功后，我可以帮你：\n\n"
+            f"1. 总结上传的文献，回答附带可点击的页码级引用\n"
+            f"2. 基于知识图谱回答跨文献的关联问题\n"
+            f"3. 用深度研究模式自动拆解子问题，生成带参考文献的综述\n"
         )
 
 

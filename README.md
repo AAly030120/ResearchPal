@@ -15,11 +15,13 @@
 <p align="center">
   <a href="#-快速开始"><strong>▶ 本地一键体验（无需 API Key）</strong></a>
   &nbsp;·&nbsp;
+  <a href="docs/DEMO_SCRIPT.md">🎬 演示剧本</a>
+  &nbsp;·&nbsp;
   <a href="docs/PRODUCT.md">📋 产品决策</a>
   &nbsp;·&nbsp;
   <a href="docs/INTERVIEW.md">🎤 面试故事库</a>
   &nbsp;·&nbsp;
-  <a href="docs/GITHUB_LAUNCH.md">🚀 推送指引</a>
+  <a href="docs/HARDENING.md">🛡️ 工程加固</a>
 </p>
 
 # ResearchPal · AI 科研助手
@@ -54,7 +56,11 @@ ResearchPal 是一款 **全栈 AI 产品**：用户上传论文 / 数据 / 文�
 
 它既是可用的科研工具，也是一个展示 **AI 产品设计 + 工程落地** 能力的作品项目。关于背后的用户研究、功能优先级、模型选型权衡与成功指标，见 [**PRODUCT.md**](docs/PRODUCT.md)。
 
-> 💡 **零配置即可体验**：不填任何 API Key 也能跑通全部功能（Demo 模式会返回示例结果，数据分析甚至会在隔离沙箱里真实执行并出图）。详见下方「快速开始」。
+> 🚀 **在线 Demo**：[researchpal-inky.vercel.app](https://researchpal-inky.vercel.app)
+> 后端由 GitHub Actions 每 10 分钟保活，点开即用、无需等待冷启动。
+> AI 功能采用「自带密钥」模式 —— 在**设置**页填入任意一家模型 Key 即可（OpenAI / DeepSeek / 智谱 GLM / 通义千问）。
+>
+> 🎬 **给面试官 / 项目评审**：5 分钟演示流程、高频追问预案与翻车救场顺序，见 [**DEMO_SCRIPT.md**](docs/DEMO_SCRIPT.md)。
 
 ---
 
@@ -97,12 +103,15 @@ ResearchPal 是一款 **全栈 AI 产品**：用户上传论文 / 数据 / 文�
 ```mermaid
 flowchart LR
   U[用户浏览器] --> F[Next.js 15 前端]
-  F --> G[FastAPI 网关\nJWT·校验·CORS]
-  G --> DB[(SQLite/Postgres\n用户·文件·任务·画像)]
-  G --> LLM[LLM 服务层\n多模型路由·流式·重试]
+  F --> G[FastAPI 网关\nJWT·校验·CORS·SSE]
+  G --> RAG[RAG 检索+重排\n父子分块·交叉编码器]
+  G --> KG[GraphRAG 知识图谱\n抽取·社区·N跳]
+  G --> AG[深度研究 Agent\n规划·检索·合成]
+  G --> LLM[LLM 服务层\n多模型路由·流式]
   G --> SB[代码沙箱\n隔离执行·图表捕获]
-  G --> FP[文件解析/转换\nPDF·DOCX·CSV]
-  G --> PPT[引用 & PPT 构建\nAPA/MLA·SVG→pptx]
+  G --> FP[文件解析/引用/PPT\nPDF·DOCX·APA/MLA]
+  RAG --> CH[(Chroma 向量库)]
+  KG --> PG[(Postgres/SQLite\n用户·文件·图谱·BYTEA)]
   LLM --> EXT[外部 LLM API\nOpenAI/DeepSeek/GLM]
 ```
 
@@ -219,8 +228,11 @@ researchpal/
 
 - [PRODUCT.md](docs/PRODUCT.md) — 用户研究、功能优先级、模型选型成本权衡、成功指标、AI 安全与学术诚信
 - [INTERVIEW.md](docs/INTERVIEW.md) — 简历要点写法 + 高频面试题回答库（为什么做 / 最大权衡 / 如何度量 / AI 安全思考）
+- [INTERVIEW_STORIES.md](docs/INTERVIEW_STORIES.md) — STAR 故事库：Render 持久化翻车 / PAT 作用域 / Python 版本锁 / 沙箱逃逸 / GraphRAG 权衡
+- [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) — 5 分钟现场演示剧本 + 翻车救场顺序（含 Plan B 录屏）
 - [GITHUB_LAUNCH.md](docs/GITHUB_LAUNCH.md) — 推送前的门面清单：About 文案 / Topics / 社交预览图上传步骤 / 推送 checklist
 - [架构图](docs/architecture.svg)
+- `backend/scripts/bench_rag.py` — 离线可跑的 RAG/重排/GraphRAG 效果评测（产出 Recall@K 与 MRR 量化指标）
 
 ---
 
