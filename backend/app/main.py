@@ -71,6 +71,33 @@ async def lifespan(app: FastAPI):
 
     threading.Thread(target=_startup_heal, daemon=True).start()
 
+    # Optional demo provisioning. Set SEED_DEMO=1 in the Render dashboard to have
+    # the instance self-seed a ready-to-demo account (sample literature + graph)
+    # on boot. Gated off by default; never blocks startup; failures are logged,
+    # not fatal. SEED_DEMO_RESET=1 wipes and rebuilds an existing demo account.
+    if os.getenv("SEED_DEMO") == "1":
+
+        def _startup_seed():
+            try:
+                import importlib.util
+
+                # scripts/ is not a package; load by path so this works regardless
+                # of how the interpreter resolves namespace packages.
+                seed_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "scripts",
+                    "seed_demo.py",
+                )
+                spec = importlib.util.spec_from_file_location("seed_demo", seed_path)
+                seed_mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(seed_mod)
+                seed_mod.run_seed(reset=os.getenv("SEED_DEMO_RESET") == "1")
+            except Exception as e:  # never crash the app because of seeding
+                logger.warning("startup demo seed failed (ignored): %s", e)
+
+        threading.Thread(target=_startup_seed, daemon=True).start()
+        logger.info("Demo seeding scheduled (SEED_DEMO=1)")
+
     yield
 
 

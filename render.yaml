@@ -61,3 +61,11 @@ services:
         sync: false
       - key: DEFAULT_MODEL
         value: gpt-4o-mini
+      # ── 演示预置开关（可选）─────────────────────────────────────────────
+      # 设为 1 后，服务每次冷启动会在后台自动预置演示账号
+      # (demo@researchpal.dev / demo1234) + 示例文献 + 预置知识图谱，
+      # 详见 docs/PROD_DEMO_SETUP.md。不配则不会预置。
+      #   - key: SEED_DEMO
+      #     sync: false
+      #   - key: SEED_DEMO_RESET
+      #     sync: false

@@ -492,19 +492,36 @@ def wipe(user: User, db):
     print("[x] 已清空演示数据")
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--with-llm", action="store_true", help="用真实 LLM 抽取图谱")
-    ap.add_argument("--reset", action="store_true", help="先清空演示数据再重建")
-    ap.add_argument("--no-index", action="store_true", help="跳过向量索引")
-    args = ap.parse_args()
+def run_seed(with_llm: bool = False, reset: bool = False, no_index: bool = False) -> None:
+    """Idempotent demo provisioning. Importable from the app lifespan so the
+    Render instance can self-seed on boot (set SEED_DEMO=1 in the dashboard).
 
+    Notes for production use
+    -------------------------
+    * The demo account lives in the database, which (on Render) is Postgres and
+      survives restarts. So seeding only needs to happen once — if the account
+      already exists we skip the whole thing unless ``reset`` is set.
+    * build_index() runs locally inside the Render instance. It sets
+      File.indexed=True in the DB; the Chroma vectors themselves are on the
+      ephemeral disk and will be rebuilt by rag_service.heal_indexes() on the
+      next restart. That is exactly what we want: the DB flags drive healing.
+    """
     Base.metadata.create_all(bind=engine)
+
+    # Guard: skip if already provisioned (don't rebuild the graph every boot).
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.email == DEMO_EMAIL).first()
+    finally:
+        db.close()
+    if existing and not reset:
+        print(f"[=] 演示账号已存在，跳过预置: {DEMO_EMAIL}（设置 SEED_DEMO_RESET=1 强制重建）")
+        return
 
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.email == DEMO_EMAIL).first()
-        if user and args.reset:
+        if user and reset:
             wipe(user, db)
         user = ensure_user(db)
         files = ensure_files(db, user)
@@ -515,12 +532,12 @@ def main():
     finally:
         db.close()
 
-    if not args.no_index:
+    if not no_index:
         build_index([fid for fid, _ in file_rows])
     else:
-        print("[-] 跳过向量索引")
+        print("[-] 跳过向量索引（渲染实例将靠 heal_indexes 自动重建）")
 
-    if args.with_llm:
+    if with_llm:
         build_graph_llm(user_id, file_rows)
     else:
         build_graph_preset(user_id, file_rows)
@@ -539,6 +556,15 @@ def main():
     print(f"  文献: {len(file_rows)} 篇")
     print(f"  图谱: {n_ent} 实体 / {n_rel} 关系")
     print("=" * 56)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--with-llm", action="store_true", help="用真实 LLM 抽取图谱")
+    ap.add_argument("--reset", action="store_true", help="先清空演示数据再重建")
+    ap.add_argument("--no-index", action="store_true", help="跳过向量索引")
+    args = ap.parse_args()
+    run_seed(with_llm=args.with_llm, reset=args.reset, no_index=args.no_index)
 
 
 if __name__ == "__main__":

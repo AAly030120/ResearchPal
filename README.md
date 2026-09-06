@@ -230,6 +230,7 @@ researchpal/
 - [INTERVIEW.md](docs/INTERVIEW.md) — 简历要点写法 + 高频面试题回答库（为什么做 / 最大权衡 / 如何度量 / AI 安全思考）
 - [INTERVIEW_STORIES.md](docs/INTERVIEW_STORIES.md) — STAR 故事库：Render 持久化翻车 / PAT 作用域 / Python 版本锁 / 沙箱逃逸 / GraphRAG 权衡
 - [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) — 5 分钟现场演示剧本 + 翻车救场顺序（含 Plan B 录屏）
+- [PROD_DEMO_SETUP.md](docs/PROD_DEMO_SETUP.md) — 线上运行时配置（Render 环境变量 + `SEED_DEMO=1` 自动预置演示账号）
 - [GITHUB_LAUNCH.md](docs/GITHUB_LAUNCH.md) — 推送前的门面清单：About 文案 / Topics / 社交预览图上传步骤 / 推送 checklist
 - [架构图](docs/architecture.svg)
 - `backend/scripts/bench_rag.py` — 离线可跑的 RAG/重排/GraphRAG 效果评测（产出 Recall@K 与 MRR 量化指标）
