@@ -42,7 +42,10 @@ class VectorStore:
         if self._client is None:
             import chromadb
             os.makedirs(settings.CHROMA_DIR, exist_ok=True)
-            self._client = chromadb.PersistentClient(path=settings.CHROMA_DIR)
+            self._client = chromadb.PersistentClient(
+                path=settings.CHROMA_DIR,
+                settings=chromadb.Settings(anonymized_telemetry=False),
+            )
         return self._client
 
     def _collection_name(self) -> str:

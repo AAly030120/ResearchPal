@@ -15,6 +15,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.models.database import engine, Base, get_db
+from sqlalchemy import inspect
 from app.models import File, Task, Conversation, Message, UserProfile  # noqa: ensure models are registered
 from app.models.user import User
 from app.api import auth, files, tasks, chat, settings as settings_api, rag as rag_api, kg as kg_api
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
                 conn.commit()
                 logger.info(f"Migration OK: {table}.{column}")
             except Exception as e:
+                conn.rollback()
                 logger.warning(f"Migration skipped for {table}.{column}: {e}")
     logger.info("Database tables ready.")
 
@@ -102,20 +104,16 @@ async def lifespan(app: FastAPI):
 
 
 def _column_exists(engine, table: str, column: str) -> bool:
-    """Cross-engine check for column existence."""
+    """Cross-engine column existence check via SQLAlchemy inspector.
+
+    Handles SQLite (PRAGMA-free) and Postgres uniformly and avoids the
+    schema/case-sensitivity pitfalls of a hand-written information_schema query.
+    """
     try:
-        with engine.connect() as c:
-            if "sqlite" in str(engine.url):
-                rows = c.execute(text(f"PRAGMA table_info({table})")).fetchall()
-                return any(str(r[1]).lower() == column.lower() for r in rows)
-            res = c.execute(
-                text(
-                    "SELECT 1 FROM information_schema.columns "
-                    "WHERE table_name=:t AND column_name=:c"
-                ),
-                {"t": table, "c": column},
-            ).fetchone()
-            return res is not None
+        insp = inspect(engine)
+        if not insp.has_table(table):
+            return False
+        return any(col["name"].lower() == column.lower() for col in insp.get_columns(table))
     except Exception:
         return False
 

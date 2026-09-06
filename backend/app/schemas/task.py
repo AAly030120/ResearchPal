@@ -32,7 +32,7 @@ class TaskResponse(BaseModel):
     keywords: Optional[list] = None        # [{keyword, score}, ...]
     related_papers: Optional[list] = None  # [{title, authors, doi, ...}, ...]
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "protected_namespaces": ()}
 
 
 class TranslateRequest(BaseModel):
